@@ -4,30 +4,15 @@ import { getAuth } from "firebase/auth";
 import { getFirestore, initializeFirestore } from "firebase/firestore";
 
 function readFirebaseConfig() {
-  const {
-    VITE_FIREBASE_API_KEY: apiKey,
-    VITE_FIREBASE_AUTH_DOMAIN: authDomain,
-    VITE_FIREBASE_PROJECT_ID: projectId,
-    VITE_FIREBASE_STORAGE_BUCKET: storageBucket,
-    VITE_FIREBASE_MESSAGING_SENDER_ID: messagingSenderId,
-    VITE_FIREBASE_APP_ID: appId,
-    VITE_FIREBASE_MEASUREMENT_ID: measurementId,
-  } = import.meta.env;
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDgCn-WcO0T69Kcky3A32WS_dQ3YapmXDY";
+  const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "sandeep-1fc6b.firebaseapp.com";
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "sandeep-1fc6b";
+  const storageBucket = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "sandeep-1fc6b.firebasestorage.app";
+  const messagingSenderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "947485367975";
+  const appId = import.meta.env.VITE_FIREBASE_APP_ID || "1:947485367975:web:d5ec70054cf8f3c42d4582";
+  const measurementId = import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-M5WX44NTWG";
 
-  if (!apiKey || !authDomain || !projectId || !storageBucket || !messagingSenderId || !appId) {
-    throw new Error(
-      "Firebase env missing: copy .env.example to .env.local and set VITE_FIREBASE_* from Firebase Console → Project settings."
-    );
-  }
-
-  const cfg = {
-    apiKey,
-    authDomain,
-    projectId,
-    storageBucket,
-    messagingSenderId,
-    appId,
-  };
+  const cfg = { apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId };
   if (measurementId) cfg.measurementId = measurementId;
   return cfg;
 }

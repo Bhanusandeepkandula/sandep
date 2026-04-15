@@ -20,7 +20,7 @@ import {
 import { useShellLayout } from "./useShellLayout.js";
 
 export default function AuthGate() {
-  const { shellMax, px: padX, safeBottom } = useShellLayout();
+  const { maxShell, px: padX, safeBottom } = useShellLayout();
   const [profiles, setProfiles] = useState(loadProfiles);
   const [tab, setTab] = useState(() => (loadProfiles().length ? "signin" : "signup"));
   const [label, setLabel] = useState("");
@@ -208,10 +208,11 @@ export default function AuthGate() {
   return (
     <div
       style={{
-        minHeight: "100dvh",
+        flex: 1,
         width: "100%",
-        maxWidth: shellMax,
-        margin: "0 auto",
+        maxWidth: maxShell,
+        alignSelf: "center",
+        minHeight: 0,
         boxSizing: "border-box",
         background: T.bg,
         color: T.txt,

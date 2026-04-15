@@ -38,9 +38,13 @@ export function useShellLayout() {
   const safeBottom = "max(12px, env(safe-area-inset-bottom, 0px))";
   const safeTop = "max(0px, env(safe-area-inset-top, 0px))";
 
+  /** Full-width on phones; px cap on larger screens (avoids side gaps / float). */
+  const maxShell = w < 640 ? "100%" : shellMax;
+
   return {
     w,
     shellMax,
+    maxShell,
     px,
     twoCol,
     comfortable,

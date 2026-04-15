@@ -26,8 +26,6 @@ import {
   Bell,
   Pencil,
   X,
-  Layers,
-  CreditCard,
   LogOut,
   Copy,
 } from "lucide-react";
@@ -35,7 +33,7 @@ import { T, card, card2, inp, lbl, pill } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
-import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc, deleteField } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
 import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
@@ -104,10 +102,6 @@ export default function App() {
   const [userCategories, setUserCategories] = useState(null);
   const [userPayments, setUserPayments] = useState(null);
 
-  const [catDraft, setCatDraft] = useState([]);
-  const [payDraft, setPayDraft] = useState("");
-  const [catSaveMsg, setCatSaveMsg] = useState("");
-
   const [fbStatus, setFbStatus] = useState("loading");
   const [fbErrorDetail, setFbErrorDetail] = useState("");
   /** Increment to re-run Firebase bootstrap (e.g. after transient Firestore `unavailable`). */
@@ -119,7 +113,7 @@ export default function App() {
   const [deviceProfiles, setDeviceProfiles] = useState(() => loadProfiles());
   const [signInIdCopied, setSignInIdCopied] = useState(false);
   const layout = useShellLayout();
-  const { shellMax, px, twoCol, comfortable, chart, safeBottom, safeTop } = layout;
+  const { maxShell, w: vw, px, twoCol, comfortable, chart, safeBottom, safeTop, isMobile } = layout;
   const uidRef = useRef(null);
   const catalogRef = useRef(catalog);
 
@@ -393,10 +387,8 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== "profile") return;
-    setCatDraft(categories.map((c) => ({ ...c })));
-    setPayDraft(payments.join("\n"));
     setDeviceProfiles(loadProfiles());
-  }, [tab, categories, payments]);
+  }, [tab]);
 
   useEffect(() => {
     setDeviceProfiles(loadProfiles());
@@ -774,80 +766,15 @@ export default function App() {
     });
   }
 
-  async function saveUserCatalog() {
-    setCatSaveMsg("");
-    const cleaned = catDraft
-      .map((c) => ({
-        n: String(c.n || "").trim(),
-        e: String(c.e || "").trim() || "📦",
-        c: String(c.c || "").trim() || "#94A3B8",
-        bg: String(c.bg || "").trim() || "rgba(148,163,184,.13)",
-      }))
-      .filter((c) => c.n.length > 0);
-    const payList = payDraft
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!cleaned.length) {
-      setCatSaveMsg("Add at least one category with a name.");
-      return;
-    }
-    if (!payList.length) {
-      setCatSaveMsg("Add at least one payment method (one per line).");
-      return;
-    }
-    if (uidRef.current) {
-      try {
-        await setDoc(
-          doc(db, "users", uidRef.current, "settings", "app"),
-          { userCategories: cleaned, userPayments: payList },
-          { merge: true }
-        );
-        setCatSaveMsg("Saved.");
-      } catch (e) {
-        console.error(e);
-        setUserCategories(cleaned);
-        setUserPayments(payList);
-        setCatSaveMsg("Saved on this device (could not reach cloud).");
-      }
-    } else {
-      setUserCategories(cleaned);
-      setUserPayments(payList);
-      setCatSaveMsg("Saved on this device.");
-    }
-  }
-
-  async function resetUserCatalogOverrides() {
-    setCatSaveMsg("");
-    if (uidRef.current) {
-      try {
-        await setDoc(
-          doc(db, "users", uidRef.current, "settings", "app"),
-          { userCategories: deleteField(), userPayments: deleteField() },
-          { merge: true }
-        );
-        setCatSaveMsg("Restored global defaults.");
-      } catch (e) {
-        console.error(e);
-        setUserCategories(null);
-        setUserPayments(null);
-        setCatSaveMsg("Restored defaults on this device.");
-      }
-    } else {
-      setUserCategories(null);
-      setUserPayments(null);
-      setCatSaveMsg("Restored defaults.");
-    }
-  }
-
   if (!authChecked) {
     return (
       <div
         style={{
-          minHeight: "100dvh",
+          flex: 1,
           width: "100%",
-          maxWidth: shellMax,
-          margin: "0 auto",
+          maxWidth: maxShell,
+          alignSelf: "center",
+          minHeight: 0,
           paddingLeft: px,
           paddingRight: px,
           boxSizing: "border-box",
@@ -875,10 +802,13 @@ export default function App() {
       style={{
         background: T.bg,
         color: T.txt,
-        minHeight: "100dvh",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
         width: "100%",
-        maxWidth: shellMax,
-        margin: "0 auto",
+        maxWidth: maxShell,
+        alignSelf: "center",
         paddingLeft: 0,
         paddingRight: 0,
         boxSizing: "border-box",
@@ -888,8 +818,6 @@ export default function App() {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
-        html,body,#root{min-height:100%;margin:0;}
-        #root{min-height:100dvh;display:flex;flex-direction:column;}
         *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
         ::-webkit-scrollbar{width:0;}
         input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.5);}
@@ -906,10 +834,12 @@ export default function App() {
           style={{
             position: "fixed",
             top: 0,
-            left: "50%",
-            transform: "translateX(-50%)",
+            left: 0,
+            right: 0,
             width: "100%",
-            maxWidth: shellMax,
+            maxWidth: maxShell,
+            marginLeft: "auto",
+            marginRight: "auto",
             zIndex: 200,
             padding: `10px ${px}px`,
             paddingTop: `max(10px, ${safeTop})`,
@@ -929,10 +859,12 @@ export default function App() {
           style={{
             position: "fixed",
             top: 0,
-            left: "50%",
-            transform: "translateX(-50%)",
+            left: 0,
+            right: 0,
             width: "100%",
-            maxWidth: shellMax,
+            maxWidth: maxShell,
+            marginLeft: "auto",
+            marginRight: "auto",
             zIndex: 200,
             padding: `12px ${px}px`,
             paddingTop: `max(12px, ${safeTop})`,
@@ -982,11 +914,11 @@ export default function App() {
       <div
         ref={mainScrollRef}
         style={{
+          flex: 1,
+          minHeight: 0,
           paddingBottom: mainBottomPad,
           overflowY: "auto",
           overflowX: "hidden",
-          height: "100dvh",
-          maxHeight: "100dvh",
           paddingTop: safeTop,
           WebkitOverflowScrolling: "touch",
         }}
@@ -1340,7 +1272,14 @@ export default function App() {
             )}
 
             {step === "form" && (
-              <div style={{ padding: `0 ${px}px` }}>
+              <div
+                style={{
+                  padding: `0 ${px}px`,
+                  paddingBottom: `max(28px, calc(16px + env(safe-area-inset-bottom, 0px)))`,
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
+              >
                 {previewImg && (
                   <div style={{ marginBottom: 14, borderRadius: T.r, overflow: "hidden", position: "relative" }}>
                     <img src={previewImg} alt="receipt" style={{ width: "100%", maxHeight: 150, objectFit: "cover" }} />
@@ -1378,7 +1317,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>
                     Amount <span style={{ color: T.dng }}>*</span>
                   </label>
@@ -1386,19 +1325,21 @@ export default function App() {
                     <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.sub, fontWeight: 700, fontSize: 18 }}>₹</span>
                     <input
                       type="number"
+                      inputMode="decimal"
+                      enterKeyHint="next"
                       placeholder="0"
                       value={form.amount}
                       onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-                      style={{ ...inp, paddingLeft: 34, fontSize: 22, fontWeight: 800 }}
+                      style={{ ...inp, paddingLeft: 34, fontSize: 22, fontWeight: 800, minHeight: 52 }}
                     />
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>
                     Category <span style={{ color: T.dng }}>*</span>
-                    <span style={{ marginLeft: 8, fontSize: 11, color: T.dng, fontWeight: 400 }}>Required — cannot be skipped</span>
                   </label>
+                  <div style={{ fontSize: 11, color: T.dng, marginBottom: 10, lineHeight: 1.35 }}>Required — pick one category.</div>
                   {fbStatus === "loading" && categories.length === 0 && (
                     <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Loading catalog…</div>
                   )}
@@ -1407,25 +1348,26 @@ export default function App() {
                       Optional: add document <code style={{ color: T.sub }}>config/app</code> in Firestore to customize categories and payments.
                     </div>
                   )}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: isMobile ? 8 : 10 }}>
                     {categories.map((c) => (
                       <button
                         type="button"
                         key={c.n}
                         onClick={() => setForm((p) => ({ ...p, category: c.n }))}
                         style={{
-                          display: "flex",
+                          display: "inline-flex",
                           alignItems: "center",
                           gap: 5,
-                          padding: "6px 11px",
+                          padding: isMobile ? "8px 12px" : "6px 11px",
                           borderRadius: 999,
                           border: form.category === c.n ? `2px solid ${c.c}` : `1px solid ${T.bdr}`,
                           background: form.category === c.n ? c.bg : "transparent",
                           color: form.category === c.n ? c.c : T.sub,
-                          fontSize: 12,
-                          fontWeight: form.category === c.n ? 700 : 400,
+                          fontSize: 13,
+                          fontWeight: form.category === c.n ? 700 : 500,
                           cursor: "pointer",
                           transition: "all .15s",
+                          minHeight: 40,
                         }}
                       >
                         {c.e} {c.n}
@@ -1434,18 +1376,50 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-                  <div>
+                <div
+                  style={{
+                    display: twoCol ? "grid" : "flex",
+                    gridTemplateColumns: twoCol ? "1fr 1fr" : undefined,
+                    flexDirection: twoCol ? undefined : "column",
+                    gap: twoCol ? 12 : 16,
+                    marginBottom: 18,
+                    width: "100%",
+                  }}
+                >
+                  <div style={{ minWidth: 0, width: "100%" }}>
                     <label style={lbl}>
                       Date <span style={{ color: T.dng }}>*</span>
                     </label>
-                    <input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))} style={inp} />
+                    <input
+                      type="date"
+                      value={form.date}
+                      onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+                      style={{
+                        ...inp,
+                        width: "100%",
+                        minWidth: 0,
+                        minHeight: 48,
+                        fontSize: 16,
+                        WebkitAppearance: "none",
+                        appearance: "none",
+                      }}
+                    />
                   </div>
-                  <div>
+                  <div style={{ minWidth: 0, width: "100%" }}>
                     <label style={lbl}>
                       Payment <span style={{ color: T.dng }}>*</span>
                     </label>
-                    <select value={form.payment} onChange={(e) => setForm((p) => ({ ...p, payment: e.target.value }))} style={{ ...inp, appearance: "none" }}>
+                    <select
+                      value={form.payment}
+                      onChange={(e) => setForm((p) => ({ ...p, payment: e.target.value }))}
+                      style={{
+                        ...inp,
+                        width: "100%",
+                        minWidth: 0,
+                        minHeight: 48,
+                        fontSize: 16,
+                      }}
+                    >
                       {payments.map((pay) => (
                         <option key={pay}>{pay}</option>
                       ))}
@@ -1453,17 +1427,34 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>Notes</label>
-                  <input placeholder="What was this for?" value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} style={inp} />
+                  <textarea
+                    placeholder="What was this for?"
+                    value={form.notes}
+                    onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+                    rows={3}
+                    style={{
+                      ...inp,
+                      resize: "vertical",
+                      minHeight: 88,
+                      lineHeight: 1.45,
+                      fontFamily: "inherit",
+                    }}
+                  />
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 18 }}>
                   <label style={lbl}>Tags (comma separated)</label>
-                  <input placeholder="work, personal, urgent" value={form.tags} onChange={(e) => setForm((p) => ({ ...p, tags: e.target.value }))} style={inp} />
+                  <input
+                    placeholder="work, personal, urgent"
+                    value={form.tags}
+                    onChange={(e) => setForm((p) => ({ ...p, tags: e.target.value }))}
+                    style={{ ...inp, minHeight: 48, fontSize: 16 }}
+                  />
                 </div>
 
-                <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ ...card, marginBottom: 20 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: splitOn ? 14 : 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Users size={15} color={splitOn ? T.acc : T.sub} />
@@ -1556,7 +1547,7 @@ export default function App() {
                 </div>
 
                 {fErr && (
-                  <div style={{ background: T.ddim, border: "1px solid rgba(239,68,68,0.35)", borderRadius: T.r, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: T.dng }}>
+                  <div style={{ background: T.ddim, border: "1px solid rgba(239,68,68,0.35)", borderRadius: T.r, padding: "12px 14px", marginBottom: 18, fontSize: 13, color: T.dng, lineHeight: 1.45 }}>
                     {fErr}
                   </div>
                 )}
@@ -1567,20 +1558,21 @@ export default function App() {
                   onClick={() => void submitForm()}
                   style={{
                     width: "100%",
-                    padding: 16,
-                    borderRadius: T.r,
+                    padding: "16px 18px",
+                    borderRadius: T.rLg,
                     background: savingExpense ? T.mut : T.acc,
                     border: "none",
                     color: "#000",
-                    fontSize: 16,
+                    fontSize: 17,
                     fontWeight: 800,
                     cursor: savingExpense ? "not-allowed" : "pointer",
-                    marginBottom: 20,
+                    marginBottom: 8,
                     opacity: savingExpense ? 0.85 : 1,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 10,
+                    minHeight: 52,
                   }}
                 >
                   {savingExpense ? (
@@ -1945,57 +1937,6 @@ export default function App() {
               )}
             </div>
 
-            {showBM && (
-              <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                <div style={{ width: "100%", maxWidth: shellMax, background: T.card, borderRadius: "20px 20px 0 0", padding: 24, boxSizing: "border-box" }}>
-                  <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 18 }}>{bmCat ? `Set Budget — ${bmCat}` : "Set Budget"}</div>
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={lbl}>Category</label>
-                    <select value={bmCat} onChange={(e) => setBmCat(e.target.value)} style={{ ...inp, appearance: "none" }}>
-                      <option value="">Select category</option>
-                      {categories.map((c) => (
-                        <option key={c.n} value={c.n}>
-                          {c.e} {c.n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div style={{ marginBottom: 22 }}>
-                    <label style={lbl}>Monthly Limit (₹)</label>
-                    <input type="number" placeholder="Enter amount" value={bmAmt} onChange={(e) => setBmAmt(e.target.value)} style={{ ...inp, fontSize: 20, fontWeight: 700 }} />
-                  </div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowBM(false);
-                        setBmCat("");
-                        setBmAmt("");
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: 14,
-                        borderRadius: T.r,
-                        border: `1px solid ${T.bdr}`,
-                        background: "transparent",
-                        color: T.sub,
-                        fontSize: 14,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={saveBudget}
-                      style={{ flex: 2, padding: 14, borderRadius: T.r, background: T.acc, border: "none", color: "#000", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                    >
-                      Save Budget
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -2173,11 +2114,10 @@ export default function App() {
               {[
                 { icon: "🔔", label: "Notifications", sub: "Daily reminders & alerts" },
                 { icon: "💱", label: "Currency", sub: "INR ₹" },
-                { icon: "🗂️", label: "Categories", sub: "Edit in Categories & payment methods below" },
                 { icon: "📤", label: "Export Data", sub: "Download CSV or PDF" },
                 { icon: "🔒", label: "Privacy & Security", sub: "Data & permissions" },
               ].map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 4 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 3 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
                   <div style={{ fontSize: 22 }}>{item.icon}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
@@ -2186,318 +2126,6 @@ export default function App() {
                   <span style={{ color: T.mut, fontSize: 18 }}>›</span>
                 </div>
               ))}
-            </div>
-
-            <div style={{ ...card, marginBottom: 14, padding: 0, overflow: "hidden" }}>
-              <div
-                style={{
-                  padding: "16px 16px 14px",
-                  borderBottom: `1px solid ${T.bdr}`,
-                  background: `linear-gradient(180deg, ${T.surf} 0%, ${T.card} 100%)`,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 12,
-                      background: T.bdim,
-                      border: `1px solid ${T.bdrH}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Layers size={20} color={T.blue} strokeWidth={2} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em" }}>Categories & payments</div>
-                    <div style={{ fontSize: 12, color: T.sub, marginTop: 4, lineHeight: 1.5 }}>
-                      Overrides are saved to your account. Reset anytime to use the global catalog from Firestore.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ padding: "14px 16px 16px" }}>
-                {catSaveMsg ? (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: T.acc,
-                      marginBottom: 14,
-                      padding: "11px 14px",
-                      borderRadius: T.r,
-                      background: T.adim,
-                      border: `1px solid rgba(34, 197, 94, 0.22)`,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {catSaveMsg}
-                  </div>
-                ) : null}
-
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                  Categories
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
-                  {catDraft.map((row, idx) => {
-                    const accentHex = /^#[0-9A-Fa-f]{6}$/.test(String(row.c || "").trim())
-                      ? row.c.trim()
-                      : "#94a3b8";
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          background: T.card2,
-                          border: `1px solid ${T.bdr}`,
-                          borderRadius: T.rLg,
-                          padding: 12,
-                        }}
-                      >
-                        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                          <div
-                            title="Preview"
-                            style={{
-                              width: 48,
-                              height: 48,
-                              borderRadius: 14,
-                              background: row.bg || "rgba(148,163,184,.13)",
-                              border: `2.5px solid ${accentHex}`,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 22,
-                              lineHeight: 1,
-                              flexShrink: 0,
-                              boxShadow: "0 4px 14px rgba(0,0,0,.35)",
-                            }}
-                          >
-                            <span aria-hidden>{row.e?.trim() ? row.e : "·"}</span>
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <label style={{ ...lbl, marginBottom: 4 }}>Name</label>
-                            <input
-                              value={row.n}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, n: v } : x)));
-                              }}
-                              placeholder="e.g. Groceries"
-                              style={{ ...inp, padding: "10px 12px", fontSize: 15, fontWeight: 600 }}
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setCatDraft((d) => d.filter((_, i) => i !== idx))}
-                            style={{
-                              alignSelf: "flex-end",
-                              width: 44,
-                              height: 44,
-                              borderRadius: T.r,
-                              border: `1px solid ${T.bdr}`,
-                              background: T.surf,
-                              color: T.mut,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                            }}
-                            aria-label="Remove category"
-                          >
-                            <X size={18} />
-                          </button>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                          <div>
-                            <label style={lbl}>Emoji</label>
-                            <input
-                              value={row.e}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, e: v } : x)));
-                              }}
-                              style={{ ...inp, padding: "10px 12px", fontSize: 18, textAlign: "center" }}
-                              aria-label="Emoji"
-                              maxLength={8}
-                            />
-                          </div>
-                          <div>
-                            <label style={lbl}>Accent</label>
-                            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-                              <input
-                                type="color"
-                                value={accentHex}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, c: v } : x)));
-                                }}
-                                style={{
-                                  width: 52,
-                                  height: 46,
-                                  padding: 4,
-                                  border: `1px solid ${T.bdr}`,
-                                  borderRadius: T.r,
-                                  background: T.surf,
-                                  cursor: "pointer",
-                                  flexShrink: 0,
-                                }}
-                                title="Pick accent color"
-                              />
-                              <input
-                                value={row.c}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, c: v } : x)));
-                                }}
-                                placeholder="#94A3B8"
-                                style={{
-                                  ...inp,
-                                  flex: 1,
-                                  padding: "10px 10px",
-                                  fontSize: 12,
-                                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ marginTop: 10 }}>
-                          <label style={lbl}>Background tint</label>
-                          <input
-                            value={row.bg}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, bg: v } : x)));
-                            }}
-                            placeholder="rgba(148, 163, 184, 0.13)"
-                            style={{
-                              ...inp,
-                              padding: "10px 12px",
-                              fontSize: 13,
-                              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCatDraft((d) => [...d, { n: "", e: "📦", c: "#94A3B8", bg: "rgba(148,163,184,.13)" }])
-                  }
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    padding: "12px 14px",
-                    borderRadius: T.rLg,
-                    border: `1px dashed ${T.bdrH}`,
-                    background: T.surf,
-                    color: T.sub,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    marginBottom: 20,
-                  }}
-                >
-                  <Plus size={16} strokeWidth={2.5} /> Add category
-                </button>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 10,
-                      background: T.bdim,
-                      border: `1px solid ${T.bdr}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <CreditCard size={16} color={T.blue} strokeWidth={2} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                      Payment methods
-                    </div>
-                    <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>One method per line</div>
-                  </div>
-                </div>
-                <textarea
-                  value={payDraft}
-                  onChange={(e) => setPayDraft(e.target.value)}
-                  rows={5}
-                  placeholder={"Cash\nUPI\nCredit Card"}
-                  style={{
-                    ...inp,
-                    width: "100%",
-                    resize: "vertical",
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    marginBottom: 16,
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    minHeight: 112,
-                    borderRadius: T.rLg,
-                  }}
-                />
-
-                <div style={{ display: "flex", gap: 10, flexDirection: "column" }}>
-                  <button
-                    type="button"
-                    onClick={() => void saveUserCatalog()}
-                    style={{
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: T.rLg,
-                      background: T.acc,
-                      border: "none",
-                      color: "#000",
-                      fontSize: 15,
-                      fontWeight: 800,
-                      cursor: "pointer",
-                      boxShadow: "0 8px 24px rgba(34, 197, 94, 0.25)",
-                    }}
-                  >
-                    Save catalog
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void resetUserCatalogOverrides()}
-                    style={{
-                      width: "100%",
-                      padding: "13px 16px",
-                      borderRadius: T.rLg,
-                      border: `1px solid ${T.bdrH}`,
-                      background: T.surf,
-                      color: T.sub,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Reset to global defaults
-                  </button>
-                </div>
-              </div>
             </div>
 
             <div style={{ ...card, marginBottom: 14 }}>
@@ -2590,16 +2218,116 @@ export default function App() {
         )}
       </div>
 
+      {showBM ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="budget-sheet-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 500,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowBM(false);
+              setBmCat("");
+              setBmAmt("");
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: maxShell,
+              maxHeight: "90dvh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              background: T.card,
+              borderRadius: "20px 20px 0 0",
+              padding: 24,
+              paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
+              boxSizing: "border-box",
+            }}
+          >
+            <div id="budget-sheet-title" style={{ fontSize: 17, fontWeight: 800, marginBottom: 18 }}>
+              {bmCat ? `Set Budget — ${bmCat}` : "Set Budget"}
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Category</label>
+              <select value={bmCat} onChange={(e) => setBmCat(e.target.value)} style={{ ...inp, appearance: "none" }}>
+                <option value="">Select category</option>
+                {categories.map((c) => (
+                  <option key={c.n} value={c.n}>
+                    {c.e} {c.n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lbl}>Monthly Limit (₹)</label>
+              <input type="number" inputMode="decimal" placeholder="Enter amount" value={bmAmt} onChange={(e) => setBmAmt(e.target.value)} style={{ ...inp, fontSize: 20, fontWeight: 700 }} />
+            </div>
+            <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBM(false);
+                  setBmCat("");
+                  setBmAmt("");
+                }}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: T.r,
+                  border: `1px solid ${T.bdr}`,
+                  background: "transparent",
+                  color: T.sub,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveBudget()}
+                style={{
+                  flex: 2,
+                  padding: 14,
+                  borderRadius: T.r,
+                  background: T.acc,
+                  border: "none",
+                  color: "#000",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Save Budget
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {saveToast ? (
         <div
           role="status"
           style={{
             position: "fixed",
             bottom: 96,
-            left: "50%",
-            transform: "translateX(-50%)",
+            left: 0,
+            right: 0,
             width: "100%",
-            maxWidth: Math.min(shellMax - 24, 520),
+            maxWidth: Math.min(Math.max(0, vw - 32), 520),
+            marginLeft: "auto",
+            marginRight: "auto",
             padding: `0 ${px}px`,
             zIndex: 150,
             pointerEvents: "none",
@@ -2635,10 +2363,12 @@ export default function App() {
         style={{
           position: "fixed",
           bottom: 0,
-          left: "50%",
-          transform: "translateX(-50%)",
+          left: 0,
+          right: 0,
           width: "100%",
-          maxWidth: shellMax,
+          maxWidth: maxShell,
+          marginLeft: "auto",
+          marginRight: "auto",
           background: `${T.surf}F0`,
           backdropFilter: "blur(24px)",
           borderTop: `1px solid ${T.bdr}`,

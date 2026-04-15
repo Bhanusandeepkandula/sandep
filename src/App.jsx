@@ -47,7 +47,7 @@ import {
   PENDING_LOGIN_EMAIL_KEY,
 } from "./auth/pinProfiles.js";
 
-const API = "/anthropic/v1/messages";
+const API = `${import.meta.env.BASE_URL}anthropic/v1/messages`;
 
 function sanitizeForFirestore(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -649,8 +649,8 @@ export default function App() {
             (raw.toLowerCase().includes("x-api-key") || raw.toLowerCase().includes("api key"));
           setScanErr(
             needsKey
-              ? `${raw} Add ANTHROPIC_API_KEY to .env.local and restart npm run dev (Vite injects x-api-key via proxy; preview/production has no proxy).`
-              : `${raw} For local dev, set ANTHROPIC_API_KEY and use npm run dev.`
+              ? `Anthropic key missing: ${raw.trim()} In the project folder, create or edit .env.local with ANTHROPIC_API_KEY=your_key (from console.anthropic.com), save, then stop and restart npm run dev. Deployed sites need a backend proxy; local dev uses Vite only.`
+              : `${raw} For scans, set ANTHROPIC_API_KEY in .env.local and use npm run dev.`
           );
           setStep("form");
           return;

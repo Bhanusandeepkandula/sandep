@@ -30,43 +30,84 @@ function parseEnvFileForKey(cwd, fileName, keyName) {
 }
 
 function resolveAnthropicApiKey(mode, cwd) {
-  const loaded = loadEnv(mode, cwd, "");
-  const fromLoadEnv = String(loaded.ANTHROPIC_API_KEY || "").trim();
+  const loaded = loadEnv(mode, cwd, ["ANTHROPIC_", "VITE_ANTHROPIC_"]);
+  const fromLoadEnv = String(
+    loaded.ANTHROPIC_API_KEY || loaded.VITE_ANTHROPIC_API_KEY || ""
+  ).trim();
   if (fromLoadEnv) return fromLoadEnv;
   const fromFile =
     parseEnvFileForKey(cwd, ".env.local", "ANTHROPIC_API_KEY") ||
-    parseEnvFileForKey(cwd, ".env", "ANTHROPIC_API_KEY");
+    parseEnvFileForKey(cwd, ".env.local", "VITE_ANTHROPIC_API_KEY") ||
+    parseEnvFileForKey(cwd, ".env", "ANTHROPIC_API_KEY") ||
+    parseEnvFileForKey(cwd, ".env", "VITE_ANTHROPIC_API_KEY");
   if (fromFile) return fromFile;
-  return String(process.env.ANTHROPIC_API_KEY || "").trim();
+  return String(
+    process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY || ""
+  ).trim();
+}
+
+/** Copy dist/index.html → dist/404.html so GitHub Pages serves the SPA on unknown paths (refresh/deep links). */
+function ghPages404Plugin() {
+  return {
+    name: "gh-pages-spa-404",
+    closeBundle() {
+      const dist = path.join(process.cwd(), "dist");
+      const indexHtml = path.join(dist, "index.html");
+      const notFoundHtml = path.join(dist, "404.html");
+      try {
+        if (fs.existsSync(indexHtml)) {
+          fs.copyFileSync(indexHtml, notFoundHtml);
+        }
+      } catch (e) {
+        console.warn("[vite] gh-pages-spa-404:", e);
+      }
+    },
+  };
+}
+
+function anthropicProxy(mode, cwd) {
+  let warnedMissingAnthropicKey = false;
+  return {
+    target: "https://api.anthropic.com",
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/anthropic/, ""),
+    configure(proxy) {
+      proxy.on("proxyReq", (proxyReq) => {
+        const key = resolveAnthropicApiKey(mode, cwd);
+        if (key) {
+          proxyReq.setHeader("x-api-key", key);
+        } else if (!warnedMissingAnthropicKey) {
+          warnedMissingAnthropicKey = true;
+          console.warn(
+            "\n[vite] ANTHROPIC_API_KEY is missing or empty. Add it to .env.local in the project root, then restart the dev server.\n" +
+              "    Example: ANTHROPIC_API_KEY=sk-ant-api03-...\n"
+          );
+        }
+        proxyReq.setHeader("anthropic-version", "2023-06-01");
+      });
+    },
+  };
 }
 
 export default defineConfig(({ mode }) => {
   const cwd = process.cwd();
-  let warnedMissingAnthropicKey = false;
+  const proxyAnthropic = anthropicProxy(mode, cwd);
+  const v = loadEnv(mode, cwd, ["VITE_"]);
+  const rawBase = (v.VITE_BASE_PATH ?? "").trim();
+  const base =
+    rawBase === "" ? "/" : rawBase.endsWith("/") ? rawBase : `${rawBase}/`;
 
   return {
-    plugins: [react()],
+    base,
+    plugins: [react(), ghPages404Plugin()],
     server: {
       proxy: {
-        "/anthropic": {
-          target: "https://api.anthropic.com",
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/anthropic/, ""),
-          configure(proxy) {
-            proxy.on("proxyReq", (proxyReq) => {
-              const key = resolveAnthropicApiKey(mode, cwd);
-              if (key) {
-                proxyReq.setHeader("x-api-key", key);
-              } else if (!warnedMissingAnthropicKey) {
-                warnedMissingAnthropicKey = true;
-                console.warn(
-                  "\n[vite] ANTHROPIC_API_KEY is missing or empty. Statement/receipt scan needs it in .env.local (then restart `npm run dev`).\n"
-                );
-              }
-              proxyReq.setHeader("anthropic-version", "2023-06-01");
-            });
-          },
-        },
+        "/anthropic": proxyAnthropic,
+      },
+    },
+    preview: {
+      proxy: {
+        "/anthropic": proxyAnthropic,
       },
     },
   };

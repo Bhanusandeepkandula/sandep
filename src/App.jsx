@@ -26,14 +26,26 @@ import {
   Bell,
   Pencil,
   X,
+  Layers,
+  CreditCard,
+  LogOut,
 } from "lucide-react";
 import { T, card, card2, inp, lbl, pill } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
-import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
-import { signInAnonymously } from "firebase/auth";
+import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc, deleteField } from "firebase/firestore";
+import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
+import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
+import AuthGate from "./AuthGate.jsx";
+import {
+  loadProfiles,
+  profileDisplayName,
+  pinToPassword,
+  isValidPin,
+  PENDING_LOGIN_EMAIL_KEY,
+} from "./auth/pinProfiles.js";
 
 const API = "/anthropic/v1/messages";
 
@@ -65,6 +77,9 @@ export default function App() {
   const [step, setStep] = useState("mode");
   const [form, setForm] = useState({ amount: "", category: "", date: tdStr(), payment: "", notes: "", tags: "" });
   const [fErr, setFErr] = useState("");
+  const [savingExpense, setSavingExpense] = useState(false);
+  /** Brief confirmation after save when navigating to Home. */
+  const [saveToast, setSaveToast] = useState(null);
   const [splitOn, setSplitOn] = useState(false);
   const [splitType, setSplitType] = useState("equal");
   const [splitPpl, setSplitPpl] = useState([]);
@@ -72,6 +87,7 @@ export default function App() {
   const [scanErr, setScanErr] = useState("");
   const fileRef = useRef();
   const stmtRef = useRef();
+  const mainScrollRef = useRef(null);
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -82,12 +98,60 @@ export default function App() {
 
   const [newP, setNewP] = useState("");
 
+  /** When set, overrides global `config/app` for this user only (stored in settings/app). */
+  const [userCategories, setUserCategories] = useState(null);
+  const [userPayments, setUserPayments] = useState(null);
+
+  const [catDraft, setCatDraft] = useState([]);
+  const [payDraft, setPayDraft] = useState("");
+  const [catSaveMsg, setCatSaveMsg] = useState("");
+
   const [fbStatus, setFbStatus] = useState("loading");
+  const [fbErrorDetail, setFbErrorDetail] = useState("");
+  /** Increment to re-run Firebase bootstrap (e.g. after transient Firestore `unavailable`). */
+  const [fbBootKey, setFbBootKey] = useState(0);
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  /** Stable UUID for this person (stored in settings + device); written on each transaction. */
+  const [profileTagUuid, setProfileTagUuid] = useState("");
+  const [deviceProfiles, setDeviceProfiles] = useState(() => loadProfiles());
   const uidRef = useRef(null);
   const catalogRef = useRef(catalog);
-  catalogRef.current = catalog;
 
-  const { categories, payments, currencyCode, locale, dateLocale, footerLine1, footerLine2 } = catalog;
+  const effectiveCatalog = useMemo(() => {
+    const F = FALLBACK_CATALOG;
+    const emptyCat = !catalog.categories?.length;
+    const emptyPay = !catalog.payments?.length;
+    const useFallback =
+      fbStatus !== "loading" &&
+      (fbStatus === "error" ||
+        fbStatus === "auth" ||
+        (fbStatus === "ready" && (emptyCat || emptyPay)));
+    let base = catalog;
+    if (useFallback) {
+      base = {
+        ...catalog,
+        categories: emptyCat ? F.categories : catalog.categories,
+        payments: emptyPay ? F.payments : catalog.payments,
+        currencyCode: catalog.currencyCode || F.currencyCode,
+        locale: catalog.locale || F.locale,
+        dateLocale: catalog.dateLocale || F.dateLocale,
+        footerLine1: catalog.footerLine1 || F.footerLine1,
+        footerLine2: catalog.footerLine2 || F.footerLine2,
+      };
+    }
+    return {
+      ...base,
+      categories: userCategories && userCategories.length > 0 ? userCategories : base.categories,
+      payments: userPayments && userPayments.length > 0 ? userPayments : base.payments,
+    };
+  }, [catalog, fbStatus, userCategories, userPayments]);
+
+  useEffect(() => {
+    catalogRef.current = effectiveCatalog;
+  }, [effectiveCatalog]);
+
+  const { categories, payments, currencyCode, locale, dateLocale, footerLine1, footerLine2 } = effectiveCatalog;
 
   const formatMoney = useCallback(
     (n) => fmt(n, { currency: currencyCode || undefined, locale: locale || undefined }),
@@ -95,17 +159,80 @@ export default function App() {
   );
 
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setAuthChecked(true);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     let active = true;
     let unsubTx;
     let unsubSettings;
     let unsubCatalog;
 
+    if (!firebaseUser) {
+      uidRef.current = null;
+      setProfileTagUuid("");
+      if (authChecked) {
+        setFbStatus("auth");
+        setFbErrorDetail("");
+        setTxs([]);
+        setBudgets({});
+        setPeople([]);
+        setUserCategories(null);
+        setUserPayments(null);
+        setCatalog({
+          categories: [],
+          payments: [],
+          currencyCode: "",
+          locale: "",
+          dateLocale: "",
+          footerLine1: "",
+          footerLine2: "",
+        });
+        setProfileName("");
+        setProfileEmail("");
+      } else {
+        setFbStatus("loading");
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    function isFirestoreTransient(err) {
+      const c = err?.code;
+      if (c === "unavailable" || c === "deadline-exceeded") return true;
+      const m = typeof err?.message === "string" ? err.message.toLowerCase() : "";
+      return m.includes("offline") || m.includes("failed to get document");
+    }
+
+    async function readSettingsDoc(settingsRef) {
+      const maxAttempts = 4;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 350 * attempt));
+          return await getDoc(settingsRef);
+        } catch (e) {
+          if (!active) throw e;
+          if (isFirestoreTransient(e) && attempt < maxAttempts - 1) continue;
+          if (isFirestoreTransient(e)) {
+            console.warn("Firestore settings read skipped (offline/transient). Listeners will retry.", e);
+            return null;
+          }
+          throw e;
+        }
+      }
+      return null;
+    }
+
     (async () => {
       try {
-        await signInAnonymously(auth);
-        const user = auth.currentUser;
-        if (!user || !active) return;
-        const uid = user.uid;
+        setFbErrorDetail("");
+        const uid = firebaseUser.uid;
+        if (!active) return;
         uidRef.current = uid;
 
         const txsCol = collection(db, "users", uid, "transactions");
@@ -138,13 +265,18 @@ export default function App() {
           });
         });
 
-        const settingsSnap = await getDoc(settingsRef);
-        if (active && !settingsSnap.exists()) {
-          await setDoc(
-            settingsRef,
-            { budgets: {}, people: [], profileName: "", profileEmail: "" },
-            { merge: true }
-          );
+        const settingsSnap = await readSettingsDoc(settingsRef);
+        if (active && settingsSnap && !settingsSnap.exists()) {
+          try {
+            await setDoc(
+              settingsRef,
+              { budgets: {}, people: [], profileName: "", profileEmail: "", appProfileUuid: "" },
+              { merge: true }
+            );
+          } catch (e) {
+            if (!isFirestoreTransient(e)) throw e;
+            console.warn("Initial settings setDoc skipped (offline/transient).", e);
+          }
         }
 
         if (!active) return;
@@ -159,7 +291,17 @@ export default function App() {
         unsubSettings = onSnapshot(settingsRef, (snap) => {
           if (!active) return;
           if (!snap.exists()) {
-            setDoc(settingsRef, { budgets: {}, people: [], profileName: "", profileEmail: "" }, { merge: true });
+            void (async () => {
+              try {
+                await setDoc(
+                  settingsRef,
+                  { budgets: {}, people: [], profileName: "", profileEmail: "", appProfileUuid: "" },
+                  { merge: true }
+                );
+              } catch (err) {
+                console.error("Failed to initialize settings document", err);
+              }
+            })();
             return;
           }
           const d = snap.data();
@@ -167,6 +309,15 @@ export default function App() {
           if (Array.isArray(d.people)) setPeople(d.people);
           setProfileName(typeof d.profileName === "string" ? d.profileName : "");
           setProfileEmail(typeof d.profileEmail === "string" ? d.profileEmail : "");
+          const uuidFromDoc =
+            typeof d.appProfileUuid === "string" && d.appProfileUuid.trim() ? d.appProfileUuid.trim() : "";
+          const match = loadProfiles().find((p) => p.email === firebaseUser?.email);
+          const uuidFromDevice = match?.uuid && String(match.uuid).trim() ? String(match.uuid).trim() : "";
+          setProfileTagUuid(uuidFromDoc || uuidFromDevice || firebaseUser?.uid || "");
+          if (Array.isArray(d.userCategories) && d.userCategories.length > 0) setUserCategories(d.userCategories);
+          else setUserCategories(null);
+          if (Array.isArray(d.userPayments) && d.userPayments.length > 0) setUserPayments(d.userPayments);
+          else setUserPayments(null);
         });
 
         try {
@@ -178,10 +329,28 @@ export default function App() {
       } catch (e) {
         console.error(e);
         if (active) {
+          const msg = e?.code ? `${e.code}: ${e.message || ""}` : e?.message || String(e);
+          setFbErrorDetail(msg);
           setFbStatus("error");
-          setTxs([]);
-          setBudgets({});
-          setPeople([]);
+          try {
+            const raw = localStorage.getItem(offlineStorageKey(uid));
+            if (raw) {
+              const o = JSON.parse(raw);
+              if (Array.isArray(o.txs)) setTxs(o.txs);
+              if (o.budgets && typeof o.budgets === "object") setBudgets(o.budgets);
+              if (Array.isArray(o.people)) setPeople(o.people);
+              if (Array.isArray(o.userCategories) && o.userCategories.length > 0) setUserCategories(o.userCategories);
+              if (Array.isArray(o.userPayments) && o.userPayments.length > 0) setUserPayments(o.userPayments);
+            } else {
+              setTxs([]);
+              setBudgets({});
+              setPeople([]);
+            }
+          } catch {
+            setTxs([]);
+            setBudgets({});
+            setPeople([]);
+          }
           setCatalog({
             categories: [],
             payments: [],
@@ -203,7 +372,45 @@ export default function App() {
       unsubSettings?.();
       unsubCatalog?.();
     };
-  }, []);
+  }, [fbBootKey, firebaseUser, authChecked]);
+
+  useEffect(() => {
+    if (fbStatus !== "error" || !firebaseUser?.uid) return;
+    try {
+      localStorage.setItem(
+        offlineStorageKey(firebaseUser.uid),
+        JSON.stringify({ txs, budgets, people, userCategories, userPayments })
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [fbStatus, firebaseUser?.uid, txs, budgets, people, userCategories, userPayments]);
+
+  useEffect(() => {
+    if (tab !== "profile") return;
+    setCatDraft(categories.map((c) => ({ ...c })));
+    setPayDraft(payments.join("\n"));
+    setDeviceProfiles(loadProfiles());
+  }, [tab, categories, payments]);
+
+  async function switchToDeviceProfile(p) {
+    if (!p?.email) return;
+    try {
+      await signOut(auth);
+      await new Promise((r) => setTimeout(r, 80));
+      if (p.pin && isValidPin(p.pin)) {
+        await signInWithEmailAndPassword(auth, p.email, pinToPassword(p.pin));
+      } else {
+        try {
+          sessionStorage.setItem(PENDING_LOGIN_EMAIL_KEY, p.email);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
   useEffect(() => {
     if (!payments.length) return;
@@ -212,6 +419,20 @@ export default function App() {
       payment: payments.includes(f.payment) ? f.payment : payments[0],
     }));
   }, [payments]);
+
+  /** After save, success UI is at top — scroll so it is not missed below the fold. */
+  useEffect(() => {
+    if (step !== "success") return;
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+
+  /** Default category on expense form so submit is not blocked with no visible selection. */
+  useEffect(() => {
+    if (tab !== "add" || step !== "form") return;
+    if (form.category) return;
+    const first = categories[0]?.n;
+    if (first) setForm((p) => ({ ...p, category: first }));
+  }, [tab, step, categories, form.category]);
 
   const filtered = useMemo(() => filterTx(txs, df, cS, cE), [txs, df, cS, cE]);
   const fTotal = useMemo(() => tot(filtered), [filtered]);
@@ -232,17 +453,16 @@ export default function App() {
       .sort((a, b) => b.value - a.value);
   }, [filtered, categories]);
 
-  const dailyData = useMemo(
-    () =>
-      Array.from({ length: 14 }, (_, i) => {
-        const d = dAgo(13 - i);
-        return {
-          label: new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
-          amount: tot(txs.filter((t) => t.date === d)),
-        };
-      }),
-    [txs]
-  );
+  const dailyData = useMemo(() => {
+    const loc = (dateLocale && String(dateLocale).trim()) || (locale && String(locale).trim()) || undefined;
+    return Array.from({ length: 14 }, (_, i) => {
+      const d = dAgo(13 - i);
+      return {
+        label: new Date(d + "T00:00:00").toLocaleDateString(loc, { day: "numeric", month: "short" }),
+        amount: tot(txs.filter((t) => t.date === d)),
+      };
+    });
+  }, [txs, dateLocale, locale]);
 
   const catSpent = useMemo(() => {
     const m = {};
@@ -266,49 +486,12 @@ export default function App() {
     setTxs((p) => p.filter((t) => t.id !== id));
   }
 
-  async function submitForm() {
-    if (!form.amount || isNaN(+form.amount) || +form.amount <= 0) {
-      setFErr("Enter a valid amount");
-      return;
-    }
-    if (!form.category) {
-      setFErr("⚠️  Category is required — this field cannot be skipped");
-      return;
-    }
-    if (!form.payment) {
-      setFErr("Select a payment method");
-      return;
-    }
-    if (!categories.length) {
-      setFErr("No categories loaded from Firestore (config/app).");
-      return;
-    }
-    if (!payments.length) {
-      setFErr("No payment methods loaded from Firestore (config/app).");
-      return;
-    }
-    setFErr("");
-    if (!uidRef.current) {
-      setFErr("Cloud sync not ready yet — wait a moment and try again.");
-      return;
-    }
-    const newTx = {
-      id: uid(),
-      amount: parseFloat(form.amount),
-      category: form.category,
-      date: form.date,
-      payment: form.payment,
-      notes: form.notes,
-      tags: form.tags ? form.tags.split(",").map((s) => s.trim()) : [],
-      split: splitOn && splitPpl.length > 0 ? { type: splitType, people: splitPpl } : null,
-    };
-    try {
-      await setDoc(doc(db, "users", uidRef.current, "transactions", newTx.id), sanitizeForFirestore(newTx));
-    } catch (e) {
-      console.error(e);
-      setFErr("Could not save expense. Check your connection.");
-      return;
-    }
+  function scrollExpenseFormTop() {
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /** Success screen, then Home + toast so saving is obvious even if the check view was scrolled away. */
+  function schedulePostSaveReset(newTx) {
     setStep("success");
     setTimeout(() => {
       setStep("mode");
@@ -318,7 +501,82 @@ export default function App() {
       setSplitPpl([]);
       setPreviewImg(null);
       setTab("home");
-    }, 1800);
+      setSaveToast(`${formatMoney(newTx.amount)} · ${newTx.category}`);
+      setTimeout(() => setSaveToast(null), 4500);
+    }, 2400);
+  }
+
+  async function submitForm() {
+    if (!form.amount || isNaN(+form.amount) || +form.amount <= 0) {
+      setFErr("Enter a valid amount");
+      scrollExpenseFormTop();
+      return;
+    }
+    if (!form.category) {
+      setFErr("⚠️  Category is required — this field cannot be skipped");
+      scrollExpenseFormTop();
+      return;
+    }
+    if (!form.payment) {
+      setFErr("Select a payment method");
+      scrollExpenseFormTop();
+      return;
+    }
+    if (!categories.length) {
+      setFErr("No categories available. Check your connection or Firestore config/app.");
+      scrollExpenseFormTop();
+      return;
+    }
+    if (!payments.length) {
+      setFErr("No payment methods available.");
+      scrollExpenseFormTop();
+      return;
+    }
+    setFErr("");
+    const splitNormalized =
+      splitOn && splitPpl.length > 0
+        ? {
+            type: splitType,
+            people: splitPpl.map((p) => ({
+              n: p.n,
+              a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0,
+            })),
+          }
+        : null;
+    const tagUuid = (profileTagUuid && String(profileTagUuid).trim()) || uidRef.current || "";
+    const newTx = {
+      id: uid(),
+      amount: parseFloat(form.amount),
+      category: form.category,
+      date: form.date,
+      payment: form.payment,
+      notes: form.notes,
+      tags: form.tags ? form.tags.split(",").map((s) => s.trim()) : [],
+      split: splitNormalized,
+      appProfileUuid: tagUuid,
+    };
+    if (!uidRef.current) {
+      if (fbStatus !== "error") {
+        setFErr("Cloud sync not ready yet — wait a moment and try again.");
+        scrollExpenseFormTop();
+        return;
+      }
+      setTxs((p) => [newTx, ...p]);
+      schedulePostSaveReset(newTx);
+      return;
+    }
+    setSavingExpense(true);
+    try {
+      await setDoc(doc(db, "users", uidRef.current, "transactions", newTx.id), sanitizeForFirestore(newTx));
+    } catch (e) {
+      console.error(e);
+      setFErr("Could not save expense. Check your connection.");
+      scrollExpenseFormTop();
+      setSavingExpense(false);
+      return;
+    }
+    setSavingExpense(false);
+    schedulePostSaveReset(newTx);
   }
 
   async function processFile(e, isStatement = false) {
@@ -382,10 +640,17 @@ export default function App() {
           /* ignore */
         }
         if (!r.ok) {
-          setScanErr(
+          const raw =
             d.error?.message ||
-              (bodyText.length > 180 ? `${bodyText.slice(0, 180)}…` : bodyText) ||
-              `Scan request failed (${r.status}). For local dev, set ANTHROPIC_API_KEY and use npm run dev (Vite proxy).`
+            (bodyText.length > 180 ? `${bodyText.slice(0, 180)}…` : bodyText) ||
+            `Scan request failed (${r.status}).`;
+          const needsKey =
+            typeof raw === "string" &&
+            (raw.toLowerCase().includes("x-api-key") || raw.toLowerCase().includes("api key"));
+          setScanErr(
+            needsKey
+              ? `${raw} Add ANTHROPIC_API_KEY to .env.local and restart npm run dev (Vite injects x-api-key via proxy; preview/production has no proxy).`
+              : `${raw} For local dev, set ANTHROPIC_API_KEY and use npm run dev.`
           );
           setStep("form");
           return;
@@ -438,7 +703,18 @@ export default function App() {
           messages: [{ role: "user", content: `Give 5 actionable expense tips: ${JSON.stringify(summary)}` }],
         }),
       });
-      const d = await r.json();
+      const bodyText = await r.text();
+      let d = {};
+      try {
+        d = JSON.parse(bodyText);
+      } catch {
+        /* ignore */
+      }
+      if (!r.ok) {
+        console.error("genTips API error", d.error?.message || bodyText.slice(0, 200) || r.status);
+        setTips([]);
+        return;
+      }
       const txt = d.content?.find((c) => c.type === "text")?.text || "[]";
       let p = [];
       try {
@@ -449,8 +725,9 @@ export default function App() {
       setTips(Array.isArray(p) ? p : []);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLdTips(false);
     }
-    setLdTips(false);
   }
 
   async function saveBudget() {
@@ -481,13 +758,104 @@ export default function App() {
       const nl = ex ? prev.filter((p) => p.n !== name) : [...prev, { n: name, a: 0 }];
       if (splitType === "equal" && form.amount && nl.length > 0) {
         const each = parseFloat(form.amount) / nl.length;
-        return nl.map((p) => ({ ...p, a: each.toFixed(2) }));
+        const rounded = Math.round(each * 100) / 100;
+        return nl.map((p) => ({ ...p, a: rounded }));
       }
       return nl;
     });
   }
 
+  async function saveUserCatalog() {
+    setCatSaveMsg("");
+    const cleaned = catDraft
+      .map((c) => ({
+        n: String(c.n || "").trim(),
+        e: String(c.e || "").trim() || "📦",
+        c: String(c.c || "").trim() || "#94A3B8",
+        bg: String(c.bg || "").trim() || "rgba(148,163,184,.13)",
+      }))
+      .filter((c) => c.n.length > 0);
+    const payList = payDraft
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!cleaned.length) {
+      setCatSaveMsg("Add at least one category with a name.");
+      return;
+    }
+    if (!payList.length) {
+      setCatSaveMsg("Add at least one payment method (one per line).");
+      return;
+    }
+    if (uidRef.current) {
+      try {
+        await setDoc(
+          doc(db, "users", uidRef.current, "settings", "app"),
+          { userCategories: cleaned, userPayments: payList },
+          { merge: true }
+        );
+        setCatSaveMsg("Saved.");
+      } catch (e) {
+        console.error(e);
+        setUserCategories(cleaned);
+        setUserPayments(payList);
+        setCatSaveMsg("Saved on this device (could not reach cloud).");
+      }
+    } else {
+      setUserCategories(cleaned);
+      setUserPayments(payList);
+      setCatSaveMsg("Saved on this device.");
+    }
+  }
+
+  async function resetUserCatalogOverrides() {
+    setCatSaveMsg("");
+    if (uidRef.current) {
+      try {
+        await setDoc(
+          doc(db, "users", uidRef.current, "settings", "app"),
+          { userCategories: deleteField(), userPayments: deleteField() },
+          { merge: true }
+        );
+        setCatSaveMsg("Restored global defaults.");
+      } catch (e) {
+        console.error(e);
+        setUserCategories(null);
+        setUserPayments(null);
+        setCatSaveMsg("Restored defaults on this device.");
+      }
+    } else {
+      setUserCategories(null);
+      setUserPayments(null);
+      setCatSaveMsg("Restored defaults.");
+    }
+  }
+
   const px = 16;
+
+  if (!authChecked) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          maxWidth: 430,
+          margin: "0 auto",
+          background: T.bg,
+          color: T.txt,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+        }}
+      >
+        <div style={{ color: T.sub, fontSize: 14 }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!firebaseUser) {
+    return <AuthGate />;
+  }
 
   return (
     <div
@@ -544,19 +912,50 @@ export default function App() {
             width: "100%",
             maxWidth: 430,
             zIndex: 200,
-            padding: "10px 16px",
+            padding: "12px 14px",
             background: T.wdim,
             borderBottom: "1px solid rgba(245,158,11,0.35)",
-            fontSize: 12,
+            fontSize: 11,
             color: T.warn,
-            textAlign: "center",
+            textAlign: "left",
+            lineHeight: 1.45,
           }}
         >
-          Cloud unavailable — expense data could not be loaded.
+          <div style={{ fontWeight: 700 }}>Cloud unavailable</div>
+          <div style={{ marginTop: 4 }}>
+            Expenses save in this browser only until Firebase works. In Console: enable <strong>Anonymous</strong> sign-in, create a <strong>Firestore</strong> database (same project), deploy rules, then use{" "}
+            <strong>Retry</strong> below.
+          </div>
+          {fbErrorDetail ? (
+            <div style={{ marginTop: 8, fontSize: 10, opacity: 0.85, wordBreak: "break-word", fontFamily: "ui-monospace, monospace" }}>
+              {fbErrorDetail.length > 160 ? `${fbErrorDetail.slice(0, 160)}…` : fbErrorDetail}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              setFbErrorDetail("");
+              setFbStatus("loading");
+              setFbBootKey((k) => k + 1);
+            }}
+            style={{
+              marginTop: 10,
+              padding: "8px 14px",
+              borderRadius: T.r,
+              border: "1px solid rgba(245,158,11,0.45)",
+              background: "rgba(0,0,0,0.2)",
+              color: T.warn,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Retry connection
+          </button>
         </div>
       )}
 
-      <div style={{ paddingBottom: 90, overflowY: "auto", height: "100vh" }}>
+      <div ref={mainScrollRef} style={{ paddingBottom: 90, overflowY: "auto", height: "100vh" }}>
         {tab === "home" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -564,20 +963,40 @@ export default function App() {
                 <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
                 <div style={{ fontSize: 22, fontWeight: 800, marginTop: 2 }}>My Expenses</div>
               </div>
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 12,
-                  background: T.card,
-                  border: `1px solid ${T.bdr}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <Bell size={17} color={T.sub} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  title="Log out"
+                  onClick={() => void signOut(auth)}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: T.card2,
+                    border: `1px solid ${T.bdr}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <LogOut size={17} color={T.sub} />
+                </button>
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: T.card,
+                    border: `1px solid ${T.bdr}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Bell size={17} color={T.sub} />
+                </div>
               </div>
             </div>
 
@@ -799,7 +1218,15 @@ export default function App() {
                 </button>
               )}
               <div style={{ fontSize: 20, fontWeight: 800 }}>
-                {step === "mode" ? "Add Expense" : step === "form" ? "Expense Details" : step === "processing" ? "Scanning Bill…" : "Done!"}
+                {step === "mode"
+                  ? "Add Expense"
+                  : step === "form"
+                    ? "Expense Details"
+                    : step === "processing"
+                      ? "Scanning Bill…"
+                      : step === "success"
+                        ? "Saved!"
+                        : "Add Expense"}
               </div>
             </div>
 
@@ -949,9 +1376,12 @@ export default function App() {
                     Category <span style={{ color: T.dng }}>*</span>
                     <span style={{ marginLeft: 8, fontSize: 11, color: T.dng, fontWeight: 400 }}>Required — cannot be skipped</span>
                   </label>
-                  {categories.length === 0 && (
-                    <div style={{ fontSize: 12, color: T.warn, marginBottom: 8 }}>
-                      Add a <code style={{ color: T.sub }}>categories</code> array to Firestore <code style={{ color: T.sub }}>config/app</code>.
+                  {fbStatus === "loading" && categories.length === 0 && (
+                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Loading catalog…</div>
+                  )}
+                  {catalog.categories.length === 0 && categories.length > 0 && fbStatus === "ready" && (
+                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>
+                      Optional: add document <code style={{ color: T.sub }}>config/app</code> in Firestore to customize categories and payments.
                     </div>
                   )}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -1110,21 +1540,34 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={submitForm}
+                  disabled={savingExpense}
+                  onClick={() => void submitForm()}
                   style={{
                     width: "100%",
                     padding: 16,
                     borderRadius: T.r,
-                    background: T.acc,
+                    background: savingExpense ? T.mut : T.acc,
                     border: "none",
                     color: "#000",
                     fontSize: 16,
                     fontWeight: 800,
-                    cursor: "pointer",
+                    cursor: savingExpense ? "not-allowed" : "pointer",
                     marginBottom: 20,
+                    opacity: savingExpense ? 0.85 : 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
                   }}
                 >
-                  Add Expense
+                  {savingExpense ? (
+                    <>
+                      <RefreshCw size={18} className="spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Add Expense"
+                  )}
                 </button>
               </div>
             )}
@@ -1465,10 +1908,33 @@ export default function App() {
         )}
 
         {tab === "profile" && (
-          <div style={{ padding: `${px + 8}px ${px}px` }}>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 22 }}>Profile & Settings</div>
+          <div style={{ padding: `${px + 8}px ${px}px 180px` }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>Profile & Settings</div>
+              <button
+                type="button"
+                onClick={() => void signOut(auth)}
+                style={{
+                  flexShrink: 0,
+                  padding: "10px 14px",
+                  borderRadius: T.r,
+                  border: `1px solid ${T.dng}`,
+                  background: T.ddim,
+                  color: T.dng,
+                  fontSize: 13,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <LogOut size={16} />
+                Log out
+              </button>
+            </div>
 
-            <div style={{ ...card, marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "center", gap: 14 }}>
               <div
                 style={{
                   width: 58,
@@ -1486,9 +1952,90 @@ export default function App() {
               >
                 {(profileName && profileName.trim()[0]) || "?"}
               </div>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 17, fontWeight: 800 }}>{profileName.trim() || "—"}</div>
                 <div style={{ fontSize: 13, color: T.sub }}>{profileEmail.trim() || "—"}</div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void signOut(auth)}
+              style={{
+                width: "100%",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                padding: "14px 16px",
+                borderRadius: T.r,
+                border: `1px solid ${T.bdrH}`,
+                background: T.surf,
+                color: T.sub,
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <LogOut size={18} />
+              Log out
+            </button>
+
+            <div style={{ ...card, marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Users on this device</div>
+              <div style={{ fontSize: 12, color: T.sub, marginBottom: 12, lineHeight: 1.45 }}>
+                Names, UUIDs, and PINs are kept in this browser so you can switch accounts.{" "}
+                {"Each user's transactions are tagged with "}
+                <code style={{ color: T.acc }}>appProfileUuid</code> and stored under their Firebase account.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {deviceProfiles.map((p) => {
+                  const isCurrent = p.email === firebaseUser?.email;
+                  const pinLabel = p.pin && isValidPin(p.pin) ? "••••" : "PIN not stored";
+                  return (
+                    <div
+                      key={p.email}
+                      style={{
+                        padding: 12,
+                        borderRadius: T.r,
+                        border: `1px solid ${isCurrent ? T.acc : T.bdr}`,
+                        background: isCurrent ? T.adim : T.card2,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>{profileDisplayName(p)}</div>
+                          <div style={{ fontSize: 11, color: T.mut, marginTop: 4, fontFamily: "ui-monospace,monospace", wordBreak: "break-all" }}>
+                            {p.uuid || "—"}
+                          </div>
+                          <div style={{ fontSize: 11, color: T.sub, marginTop: 4 }}>
+                            PIN: {pinLabel} {isCurrent ? "(signed in)" : ""}
+                          </div>
+                        </div>
+                        {!isCurrent ? (
+                          <button
+                            type="button"
+                            onClick={() => void switchToDeviceProfile(p)}
+                            style={{
+                              flexShrink: 0,
+                              padding: "8px 12px",
+                              borderRadius: T.r,
+                              border: `1px solid ${T.bdrH}`,
+                              background: T.surf,
+                              color: T.acc,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Switch
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1503,6 +2050,361 @@ export default function App() {
                   <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>{s.l}</div>
                 </div>
               ))}
+            </div>
+
+            <div style={{ ...card, marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Settings</div>
+              <button
+                type="button"
+                onClick={() => void signOut(auth)}
+                style={{
+                  width: "100%",
+                  marginBottom: 14,
+                  padding: "14px 14px",
+                  borderRadius: T.r,
+                  border: `1px solid ${T.dng}`,
+                  background: T.ddim,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  textAlign: "left",
+                }}
+              >
+                <LogOut size={22} color={T.dng} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: T.dng }}>Log out of app</div>
+                  <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Return to PIN screen</div>
+                </div>
+              </button>
+              {[
+                { icon: "🔔", label: "Notifications", sub: "Daily reminders & alerts" },
+                { icon: "💱", label: "Currency", sub: "INR ₹" },
+                { icon: "🗂️", label: "Categories", sub: "Edit in Categories & payment methods below" },
+                { icon: "📤", label: "Export Data", sub: "Download CSV or PDF" },
+                { icon: "🔒", label: "Privacy & Security", sub: "Data & permissions" },
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 4 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
+                  <div style={{ fontSize: 22 }}>{item.icon}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
+                    <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
+                  </div>
+                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...card, marginBottom: 14, padding: 0, overflow: "hidden" }}>
+              <div
+                style={{
+                  padding: "16px 16px 14px",
+                  borderBottom: `1px solid ${T.bdr}`,
+                  background: `linear-gradient(180deg, ${T.surf} 0%, ${T.card} 100%)`,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      background: T.bdim,
+                      border: `1px solid ${T.bdrH}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Layers size={20} color={T.blue} strokeWidth={2} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em" }}>Categories & payments</div>
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 4, lineHeight: 1.5 }}>
+                      Overrides are saved to your account. Reset anytime to use the global catalog from Firestore.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "14px 16px 16px" }}>
+                {catSaveMsg ? (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: T.acc,
+                      marginBottom: 14,
+                      padding: "11px 14px",
+                      borderRadius: T.r,
+                      background: T.adim,
+                      border: `1px solid rgba(34, 197, 94, 0.22)`,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {catSaveMsg}
+                  </div>
+                ) : null}
+
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+                  Categories
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+                  {catDraft.map((row, idx) => {
+                    const accentHex = /^#[0-9A-Fa-f]{6}$/.test(String(row.c || "").trim())
+                      ? row.c.trim()
+                      : "#94a3b8";
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          background: T.card2,
+                          border: `1px solid ${T.bdr}`,
+                          borderRadius: T.rLg,
+                          padding: 12,
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                          <div
+                            title="Preview"
+                            style={{
+                              width: 48,
+                              height: 48,
+                              borderRadius: 14,
+                              background: row.bg || "rgba(148,163,184,.13)",
+                              border: `2.5px solid ${accentHex}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 22,
+                              lineHeight: 1,
+                              flexShrink: 0,
+                              boxShadow: "0 4px 14px rgba(0,0,0,.35)",
+                            }}
+                          >
+                            <span aria-hidden>{row.e?.trim() ? row.e : "·"}</span>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <label style={{ ...lbl, marginBottom: 4 }}>Name</label>
+                            <input
+                              value={row.n}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, n: v } : x)));
+                              }}
+                              placeholder="e.g. Groceries"
+                              style={{ ...inp, padding: "10px 12px", fontSize: 15, fontWeight: 600 }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCatDraft((d) => d.filter((_, i) => i !== idx))}
+                            style={{
+                              alignSelf: "flex-end",
+                              width: 44,
+                              height: 44,
+                              borderRadius: T.r,
+                              border: `1px solid ${T.bdr}`,
+                              background: T.surf,
+                              color: T.mut,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                            aria-label="Remove category"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          <div>
+                            <label style={lbl}>Emoji</label>
+                            <input
+                              value={row.e}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, e: v } : x)));
+                              }}
+                              style={{ ...inp, padding: "10px 12px", fontSize: 18, textAlign: "center" }}
+                              aria-label="Emoji"
+                              maxLength={8}
+                            />
+                          </div>
+                          <div>
+                            <label style={lbl}>Accent</label>
+                            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                              <input
+                                type="color"
+                                value={accentHex}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, c: v } : x)));
+                                }}
+                                style={{
+                                  width: 52,
+                                  height: 46,
+                                  padding: 4,
+                                  border: `1px solid ${T.bdr}`,
+                                  borderRadius: T.r,
+                                  background: T.surf,
+                                  cursor: "pointer",
+                                  flexShrink: 0,
+                                }}
+                                title="Pick accent color"
+                              />
+                              <input
+                                value={row.c}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, c: v } : x)));
+                                }}
+                                placeholder="#94A3B8"
+                                style={{
+                                  ...inp,
+                                  flex: 1,
+                                  padding: "10px 10px",
+                                  fontSize: 12,
+                                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <label style={lbl}>Background tint</label>
+                          <input
+                            value={row.bg}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setCatDraft((d) => d.map((x, i) => (i === idx ? { ...x, bg: v } : x)));
+                            }}
+                            placeholder="rgba(148, 163, 184, 0.13)"
+                            style={{
+                              ...inp,
+                              padding: "10px 12px",
+                              fontSize: 13,
+                              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCatDraft((d) => [...d, { n: "", e: "📦", c: "#94A3B8", bg: "rgba(148,163,184,.13)" }])
+                  }
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: "12px 14px",
+                    borderRadius: T.rLg,
+                    border: `1px dashed ${T.bdrH}`,
+                    background: T.surf,
+                    color: T.sub,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    marginBottom: 20,
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2.5} /> Add category
+                </button>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 10,
+                      background: T.bdim,
+                      border: `1px solid ${T.bdr}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <CreditCard size={16} color={T.blue} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      Payment methods
+                    </div>
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>One method per line</div>
+                  </div>
+                </div>
+                <textarea
+                  value={payDraft}
+                  onChange={(e) => setPayDraft(e.target.value)}
+                  rows={5}
+                  placeholder={"Cash\nUPI\nCredit Card"}
+                  style={{
+                    ...inp,
+                    width: "100%",
+                    resize: "vertical",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    marginBottom: 16,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    minHeight: 112,
+                    borderRadius: T.rLg,
+                  }}
+                />
+
+                <div style={{ display: "flex", gap: 10, flexDirection: "column" }}>
+                  <button
+                    type="button"
+                    onClick={() => void saveUserCatalog()}
+                    style={{
+                      width: "100%",
+                      padding: "14px 16px",
+                      borderRadius: T.rLg,
+                      background: T.acc,
+                      border: "none",
+                      color: "#000",
+                      fontSize: 15,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      boxShadow: "0 8px 24px rgba(34, 197, 94, 0.25)",
+                    }}
+                  >
+                    Save catalog
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void resetUserCatalogOverrides()}
+                    style={{
+                      width: "100%",
+                      padding: "13px 16px",
+                      borderRadius: T.rLg,
+                      border: `1px solid ${T.bdrH}`,
+                      background: T.surf,
+                      color: T.sub,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Reset to global defaults
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div style={{ ...card, marginBottom: 14 }}>
@@ -1581,26 +2483,6 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Settings</div>
-              {[
-                { icon: "🔔", label: "Notifications", sub: "Daily reminders & alerts" },
-                { icon: "💱", label: "Currency", sub: "INR ₹" },
-                { icon: "🗂️", label: "Categories", sub: "Manage custom categories" },
-                { icon: "📤", label: "Export Data", sub: "Download CSV or PDF" },
-                { icon: "🔒", label: "Privacy & Security", sub: "Data & permissions" },
-              ].map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 4 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
-                  <div style={{ fontSize: 22 }}>{item.icon}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
-                    <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
-                  </div>
-                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
-                </div>
-              ))}
-            </div>
-
             {(footerLine1 || footerLine2) && (
               <div style={{ textAlign: "center", padding: "10px 0 0" }}>
                 {footerLine1 ? (
@@ -1614,6 +2496,88 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {saveToast ? (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            bottom: 96,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "100%",
+            maxWidth: 398,
+            padding: "0 16px",
+            zIndex: 150,
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            className="pop"
+            style={{
+              background: T.card2,
+              border: `1px solid ${T.acc}`,
+              color: T.txt,
+              borderRadius: T.rLg,
+              padding: "12px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              textAlign: "center",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <Check size={18} color={T.acc} strokeWidth={3} />
+            <span>
+              Expense saved — <span style={{ color: T.acc }}>{saveToast}</span>
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "profile" ? (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: 56,
+            width: "100%",
+            maxWidth: 430,
+            padding: "0 16px",
+            paddingBottom: "max(10px, env(safe-area-inset-bottom, 0px))",
+            zIndex: 100,
+            boxSizing: "border-box",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void signOut(auth)}
+            style={{
+              width: "100%",
+              padding: "14px 16px",
+              borderRadius: T.rLg,
+              border: `2px solid ${T.dng}`,
+              background: T.ddim,
+              color: T.dng,
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+            }}
+          >
+            <LogOut size={20} />
+            Log out of app
+          </button>
+        </div>
+      ) : null}
 
       <div
         style={{

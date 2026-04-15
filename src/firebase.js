@@ -1,20 +1,57 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDgCn-WcO0T69Kcky3A32WS_dQ3YapmXDY",
-  authDomain: "sandeep-1fc6b.firebaseapp.com",
-  projectId: "sandeep-1fc6b",
-  storageBucket: "sandeep-1fc6b.firebasestorage.app",
-  messagingSenderId: "947485367975",
-  appId: "1:947485367975:web:d5ec70054cf8f3c42d4582",
-  measurementId: "G-M5WX44NTWG",
-};
+function readFirebaseConfig() {
+  const {
+    VITE_FIREBASE_API_KEY: apiKey,
+    VITE_FIREBASE_AUTH_DOMAIN: authDomain,
+    VITE_FIREBASE_PROJECT_ID: projectId,
+    VITE_FIREBASE_STORAGE_BUCKET: storageBucket,
+    VITE_FIREBASE_MESSAGING_SENDER_ID: messagingSenderId,
+    VITE_FIREBASE_APP_ID: appId,
+    VITE_FIREBASE_MEASUREMENT_ID: measurementId,
+  } = import.meta.env;
+
+  if (!apiKey || !authDomain || !projectId || !storageBucket || !messagingSenderId || !appId) {
+    throw new Error(
+      "Firebase env missing: copy .env.example to .env.local and set VITE_FIREBASE_* from Firebase Console → Project settings."
+    );
+  }
+
+  const cfg = {
+    apiKey,
+    authDomain,
+    projectId,
+    storageBucket,
+    messagingSenderId,
+    appId,
+  };
+  if (measurementId) cfg.measurementId = measurementId;
+  return cfg;
+}
+
+const firebaseConfig = readFirebaseConfig();
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+/** Prefer streaming; fall back to long-polling when Listen/WebChannel is blocked (firewalls, some extensions). */
+function createFirestore() {
+  const force =
+    import.meta.env.VITE_FIREBASE_FORCE_LONG_POLLING === "1" ||
+    import.meta.env.VITE_FIREBASE_FORCE_LONG_POLLING === "true";
+  const settings = force
+    ? { experimentalForceLongPolling: true }
+    : { experimentalAutoDetectLongPolling: true };
+  try {
+    return initializeFirestore(app, settings);
+  } catch {
+    return getFirestore(app);
+  }
+}
+
+export const db = createFirestore();
 export const auth = getAuth(app);
 
 let analyticsInit = null;

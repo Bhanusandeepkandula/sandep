@@ -1,0 +1,23 @@
+{
+  "categories": [
+    { "n": "Food", "e": "🍔", "c": "#FF6B35", "bg": "rgba(255,107,53,.13)" },
+    { "n": "Travel", "e": "✈️", "c": "#60A5FA", "bg": "rgba(96,165,250,.13)" },
+    { "n": "Rent", "e": "🏠", "c": "#A78BFA", "bg": "rgba(167,139,250,.13)" },
+    { "n": "Shopping", "e": "🛍️", "c": "#F472B6", "bg": "rgba(244,114,182,.13)" },
+    { "n": "Bills", "e": "⚡", "c": "#FBBF24", "bg": "rgba(251,191,36,.13)" },
+    { "n": "Entertainment", "e": "🎬", "c": "#22D3EE", "bg": "rgba(34,211,238,.13)" },
+    { "n": "Health", "e": "❤️", "c": "#4ADE80", "bg": "rgba(74,222,128,.13)" },
+    { "n": "Education", "e": "📚", "c": "#FB923C", "bg": "rgba(251,146,60,.13)" },
+    { "n": "Subscriptions", "e": "🔄", "c": "#E879F9", "bg": "rgba(232,121,249,.13)" },
+    { "n": "Groceries", "e": "🛒", "c": "#86EFAC", "bg": "rgba(134,239,172,.13)" },
+    { "n": "Transport", "e": "🚗", "c": "#93C5FD", "bg": "rgba(147,197,253,.13)" },
+    { "n": "Investments", "e": "📈", "c": "#A3E635", "bg": "rgba(163,230,53,.13)" },
+    { "n": "Others", "e": "📦", "c": "#94A3B8", "bg": "rgba(148,163,184,.13)" }
+  ],
+  "payments": ["Cash", "Credit Card", "Debit Card", "UPI", "Net Banking", "Wallet"],
+  "currencyCode": "INR",
+  "locale": "en-IN",
+  "dateLocale": "en-IN",
+  "footerLine1": "",
+  "footerLine2": ""
+}

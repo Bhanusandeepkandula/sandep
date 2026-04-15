@@ -19,7 +19,7 @@ import {
 
 export default function AuthGate() {
   const [profiles, setProfiles] = useState(loadProfiles);
-  const [mode, setMode] = useState(() => (loadProfiles().length ? "login" : "create"));
+  const [tab, setTab] = useState(() => (loadProfiles().length ? "signin" : "signup"));
   const [label, setLabel] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
@@ -32,7 +32,7 @@ export default function AuthGate() {
       const pending = sessionStorage.getItem(PENDING_LOGIN_EMAIL_KEY);
       if (pending && profiles.some((p) => p.email === pending)) {
         setSelectedEmail(pending);
-        setMode("login");
+        setTab("signin");
         sessionStorage.removeItem(PENDING_LOGIN_EMAIL_KEY);
       }
     } catch {
@@ -97,7 +97,7 @@ export default function AuthGate() {
       setLabel("");
       setPin("");
       setPin2("");
-      setMode("login");
+      setTab("signin");
       setSelectedEmail(email);
     } catch (e) {
       const code = e?.code || "";
@@ -170,48 +170,60 @@ export default function AuthGate() {
         Same catalog for everyone. Each person has a UUID and their own expenses under their account. Names and PINs are stored on this device to switch users quickly.
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {profiles.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              setMode("login");
-              setErr("");
-            }}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              borderRadius: T.r,
-              border: mode === "login" ? `1px solid ${T.acc}` : `1px solid ${T.bdr}`,
-              background: mode === "login" ? T.adim : "transparent",
-              color: mode === "login" ? T.acc : T.sub,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontSize: 14,
-            }}
-          >
-            Sign in
-          </button>
-        )}
+      <div
+        role="tablist"
+        aria-label="Authentication"
+        style={{
+          display: "flex",
+          marginBottom: 20,
+          borderRadius: T.r,
+          overflow: "hidden",
+          border: `1px solid ${T.bdr}`,
+          background: T.card2,
+        }}
+      >
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === "signin"}
           onClick={() => {
-            setMode("create");
+            setTab("signin");
             setErr("");
           }}
           style={{
             flex: 1,
-            padding: "10px 12px",
-            borderRadius: T.r,
-            border: mode === "create" ? `1px solid ${T.acc}` : `1px solid ${T.bdr}`,
-            background: mode === "create" ? T.adim : "transparent",
-            color: mode === "create" ? T.acc : T.sub,
-            fontWeight: 700,
+            padding: "12px 14px",
+            border: "none",
+            borderRight: `1px solid ${T.bdr}`,
+            background: tab === "signin" ? T.adim : "transparent",
+            color: tab === "signin" ? T.acc : T.sub,
+            fontWeight: 800,
             cursor: "pointer",
-            fontSize: 14,
+            fontSize: 15,
           }}
         >
-          New profile
+          Sign in
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "signup"}
+          onClick={() => {
+            setTab("signup");
+            setErr("");
+          }}
+          style={{
+            flex: 1,
+            padding: "12px 14px",
+            border: "none",
+            background: tab === "signup" ? T.adim : "transparent",
+            color: tab === "signup" ? T.acc : T.sub,
+            fontWeight: 800,
+            cursor: "pointer",
+            fontSize: 15,
+          }}
+        >
+          Sign up
         </button>
       </div>
 
@@ -231,7 +243,7 @@ export default function AuthGate() {
         </div>
       ) : null}
 
-      {mode === "login" && profiles.length > 0 ? (
+      {tab === "signin" && profiles.length > 0 ? (
         <form onSubmit={(e) => void handleLogin(e)} style={{ ...card, marginBottom: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Profile</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -292,7 +304,7 @@ export default function AuthGate() {
         </form>
       ) : null}
 
-      {mode === "create" ? (
+      {tab === "signup" ? (
         <form onSubmit={(e) => void handleCreate(e)} style={{ ...card, marginBottom: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Create a profile</div>
           <label style={lbl}>Your name</label>
@@ -344,8 +356,10 @@ export default function AuthGate() {
         </form>
       ) : null}
 
-      {mode === "login" && profiles.length === 0 ? (
-        <div style={{ ...card, color: T.sub, fontSize: 14 }}>Create your first profile with &quot;New profile&quot;.</div>
+      {tab === "signin" && profiles.length === 0 ? (
+        <div style={{ ...card, color: T.sub, fontSize: 14, lineHeight: 1.5 }}>
+          No profile on this device yet. Open the <strong style={{ color: T.txt }}>Sign up</strong> tab to create one.
+        </div>
       ) : null}
     </div>
   );

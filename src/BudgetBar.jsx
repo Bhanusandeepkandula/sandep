@@ -1,0 +1,33 @@
+import { T } from "./config.js";
+import { getCat } from "./utils.js";
+
+export function BudgetBar({ cat, limit, spent, categories, formatMoney }) {
+  const c = getCat(categories, cat);
+  const pct = Math.min(Math.round((spent / limit) * 100), 100);
+  const over = spent > limit;
+  const near = !over && pct >= 80;
+  const barC = over ? T.dng : near ? T.warn : c.c;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 18 }}>{c.e}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: T.txt }}>{cat}</span>
+          {over && (
+            <span style={{ fontSize: 11, color: T.dng, background: T.ddim, borderRadius: 6, padding: "1px 8px" }}>Over!</span>
+          )}
+          {near && (
+            <span style={{ fontSize: 11, color: T.warn, background: T.wdim, borderRadius: 6, padding: "1px 8px" }}>80%</span>
+          )}
+        </div>
+        <div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: over ? T.dng : T.txt }}>{formatMoney(spent)}</span>
+          <span style={{ fontSize: 12, color: T.sub }}> / {formatMoney(limit)}</span>
+        </div>
+      </div>
+      <div style={{ height: 5, background: T.card2, borderRadius: 999, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: barC, borderRadius: 999, transition: "width .6s ease" }} />
+      </div>
+    </div>
+  );
+}

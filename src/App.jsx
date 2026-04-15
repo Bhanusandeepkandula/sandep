@@ -29,6 +29,7 @@ import {
   Layers,
   CreditCard,
   LogOut,
+  Copy,
 } from "lucide-react";
 import { T, card, card2, inp, lbl, pill } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
@@ -39,6 +40,7 @@ import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebas
 import { db, auth, initAnalytics } from "./firebase.js";
 import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
 import AuthGate from "./AuthGate.jsx";
+import { useShellLayout } from "./useShellLayout.js";
 import {
   loadProfiles,
   profileDisplayName,
@@ -115,6 +117,9 @@ export default function App() {
   /** Stable UUID for this person (stored in settings + device); written on each transaction. */
   const [profileTagUuid, setProfileTagUuid] = useState("");
   const [deviceProfiles, setDeviceProfiles] = useState(() => loadProfiles());
+  const [signInIdCopied, setSignInIdCopied] = useState(false);
+  const layout = useShellLayout();
+  const { shellMax, px, twoCol, comfortable, chart, safeBottom, safeTop } = layout;
   const uidRef = useRef(null);
   const catalogRef = useRef(catalog);
 
@@ -392,6 +397,10 @@ export default function App() {
     setPayDraft(payments.join("\n"));
     setDeviceProfiles(loadProfiles());
   }, [tab, categories, payments]);
+
+  useEffect(() => {
+    setDeviceProfiles(loadProfiles());
+  }, [firebaseUser?.uid]);
 
   async function switchToDeviceProfile(p) {
     if (!p?.email) return;
@@ -831,15 +840,17 @@ export default function App() {
     }
   }
 
-  const px = 16;
-
   if (!authChecked) {
     return (
       <div
         style={{
-          minHeight: "100vh",
-          maxWidth: 430,
+          minHeight: "100dvh",
+          width: "100%",
+          maxWidth: shellMax,
           margin: "0 auto",
+          paddingLeft: px,
+          paddingRight: px,
+          boxSizing: "border-box",
           background: T.bg,
           color: T.txt,
           display: "flex",
@@ -857,24 +868,33 @@ export default function App() {
     return <AuthGate />;
   }
 
+  const mainBottomPad = "calc(96px + env(safe-area-inset-bottom, 0px))";
+
   return (
     <div
       style={{
         background: T.bg,
         color: T.txt,
-        minHeight: "100vh",
-        maxWidth: 430,
+        minHeight: "100dvh",
+        width: "100%",
+        maxWidth: shellMax,
         margin: "0 auto",
+        paddingLeft: 0,
+        paddingRight: 0,
+        boxSizing: "border-box",
         fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
         position: "relative",
       }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
+        html,body,#root{min-height:100%;margin:0;}
+        #root{min-height:100dvh;display:flex;flex-direction:column;}
         *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
         ::-webkit-scrollbar{width:0;}
         input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.5);}
         select option{background:#15152A;color:#fff;}
+        button,input,select,textarea,a{-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
         @keyframes spin{to{transform:rotate(360deg);}}
         .spin{animation:spin 1s linear infinite;}
         @keyframes pop{0%{transform:scale(0.8);opacity:0}100%{transform:scale(1);opacity:1}}
@@ -889,14 +909,16 @@ export default function App() {
             left: "50%",
             transform: "translateX(-50%)",
             width: "100%",
-            maxWidth: 430,
+            maxWidth: shellMax,
             zIndex: 200,
-            padding: "10px 16px",
+            padding: `10px ${px}px`,
+            paddingTop: `max(10px, ${safeTop})`,
             background: T.card2,
             borderBottom: `1px solid ${T.bdr}`,
             fontSize: 12,
             color: T.sub,
             textAlign: "center",
+            boxSizing: "border-box",
           }}
         >
           Connecting to cloud…
@@ -910,15 +932,17 @@ export default function App() {
             left: "50%",
             transform: "translateX(-50%)",
             width: "100%",
-            maxWidth: 430,
+            maxWidth: shellMax,
             zIndex: 200,
-            padding: "12px 14px",
+            padding: `12px ${px}px`,
+            paddingTop: `max(12px, ${safeTop})`,
             background: T.wdim,
             borderBottom: "1px solid rgba(245,158,11,0.35)",
             fontSize: 11,
             color: T.warn,
             textAlign: "left",
             lineHeight: 1.45,
+            boxSizing: "border-box",
           }}
         >
           <div style={{ fontWeight: 700 }}>Cloud unavailable</div>
@@ -955,48 +979,40 @@ export default function App() {
         </div>
       )}
 
-      <div ref={mainScrollRef} style={{ paddingBottom: 90, overflowY: "auto", height: "100vh" }}>
+      <div
+        ref={mainScrollRef}
+        style={{
+          paddingBottom: mainBottomPad,
+          overflowY: "auto",
+          overflowX: "hidden",
+          height: "100dvh",
+          maxHeight: "100dvh",
+          paddingTop: safeTop,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         {tab === "home" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
-                <div style={{ fontSize: 22, fontWeight: 800, marginTop: 2 }}>My Expenses</div>
+                <div style={{ fontSize: comfortable ? 26 : 22, fontWeight: 800, marginTop: 2 }}>My Expenses</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button
-                  type="button"
-                  title="Log out"
-                  onClick={() => void signOut(auth)}
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 12,
-                    background: T.card2,
-                    border: `1px solid ${T.bdr}`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                  }}
-                >
-                  <LogOut size={17} color={T.sub} />
-                </button>
-                <div
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 12,
-                    background: T.card,
-                    border: `1px solid ${T.bdr}`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Bell size={17} color={T.sub} />
-                </div>
+              <div
+                title="Notifications"
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  background: T.card,
+                  border: `1px solid ${T.bdr}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <Bell size={17} color={T.sub} />
               </div>
             </div>
 
@@ -1100,7 +1116,14 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ margin: `0 ${px}px 14px`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div
+              style={{
+                margin: `0 ${px}px 14px`,
+                display: "grid",
+                gridTemplateColumns: comfortable ? "repeat(2, minmax(0, 1fr))" : "1fr 1fr",
+                gap: comfortable ? 14 : 10,
+              }}
+            >
               {[
                 {
                   icon: "📷",
@@ -1577,7 +1600,7 @@ export default function App() {
         {tab === "analytics" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
-              <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 14 }}>Analytics</div>
+              <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 14 }}>Analytics</div>
               <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
                 {[
                   ["today", "Today"],
@@ -1610,60 +1633,129 @@ export default function App() {
               <div style={{ fontSize: 13, color: T.sub, marginTop: 3 }}>{filtered.length} transactions</div>
             </div>
 
-            {breakdown.length > 0 && (
-              <div style={{ margin: `0 ${px}px 14px`, ...card }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Category Breakdown</div>
-                <ResponsiveContainer width="100%" height={190}>
-                  <PieChart>
-                    <Pie data={breakdown} cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={3} dataKey="value">
-                      {breakdown.map((e, i) => (
-                        <Cell key={i} fill={e.c} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
-                  {breakdown.slice(0, 7).map((b, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
-                        <span style={{ fontSize: 13 }}>
-                          {b.e} {b.name}
-                        </span>
+            {twoCol && breakdown.length > 0 ? (
+              <div
+                style={{
+                  margin: `0 ${px}px 14px`,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 14,
+                  alignItems: "stretch",
+                }}
+              >
+                <div style={{ ...card, margin: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Category Breakdown</div>
+                  <ResponsiveContainer width="100%" height={chart.pie}>
+                    <PieChart>
+                      <Pie
+                        data={breakdown}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={twoCol ? 40 : 52}
+                        outerRadius={twoCol ? 68 : 82}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {breakdown.map((e, i) => (
+                          <Cell key={i} fill={e.c} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                    {breakdown.slice(0, 7).map((b, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {b.e} {b.name}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 11, color: T.sub }}>{Math.round((b.value / fTotal) * 100)}%</span>
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(b.value)}</span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: T.sub }}>{Math.round((b.value / fTotal) * 100)}%</span>
-                        <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(b.value)}</span>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </div>
+                <div style={{ ...card, margin: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Daily Spending (14 days)</div>
+                  <ResponsiveContainer width="100%" height={chart.area}>
+                    <AreaChart data={dailyData}>
+                      <defs>
+                        <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={T.acc} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={T.acc} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="label" tick={{ fontSize: 9, fill: T.sub }} tickLine={false} axisLine={false} interval={3} />
+                      <YAxis hide />
+                      <Tooltip formatter={(v) => [formatMoney(v), "Spent"]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="amount" stroke={T.acc} strokeWidth={2} fill="url(#ag)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
-            )}
+            ) : (
+              <>
+                {breakdown.length > 0 && (
+                  <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Category Breakdown</div>
+                    <ResponsiveContainer width="100%" height={chart.pie}>
+                      <PieChart>
+                        <Pie data={breakdown} cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={3} dataKey="value">
+                          {breakdown.map((e, i) => (
+                            <Cell key={i} fill={e.c} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+                      {breakdown.slice(0, 7).map((b, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
+                            <span style={{ fontSize: 13 }}>
+                              {b.e} {b.name}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 12, color: T.sub }}>{Math.round((b.value / fTotal) * 100)}%</span>
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(b.value)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-            <div style={{ margin: `0 ${px}px 14px`, ...card }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Daily Spending (14 days)</div>
-              <ResponsiveContainer width="100%" height={150}>
-                <AreaChart data={dailyData}>
-                  <defs>
-                    <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={T.acc} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={T.acc} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: T.sub }} tickLine={false} axisLine={false} interval={3} />
-                  <YAxis hide />
-                  <Tooltip formatter={(v) => [formatMoney(v), "Spent"]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
-                  <Area type="monotone" dataKey="amount" stroke={T.acc} strokeWidth={2} fill="url(#ag)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+                <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Daily Spending (14 days)</div>
+                  <ResponsiveContainer width="100%" height={chart.area}>
+                    <AreaChart data={dailyData}>
+                      <defs>
+                        <linearGradient id="ag2" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={T.acc} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={T.acc} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: T.sub }} tickLine={false} axisLine={false} interval={3} />
+                      <YAxis hide />
+                      <Tooltip formatter={(v) => [formatMoney(v), "Spent"]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="amount" stroke={T.acc} strokeWidth={2} fill="url(#ag2)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
 
             {breakdown.length > 0 && (
               <div style={{ margin: `0 ${px}px 14px`, ...card }}>
                 <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Top Spending Categories</div>
-                <ResponsiveContainer width="100%" height={185}>
+                <ResponsiveContainer width="100%" height={chart.bar}>
                   <BarChart data={breakdown.slice(0, 6)} layout="vertical" margin={{ left: 4, right: 10 }}>
                     <XAxis type="number" hide />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: T.sub }} tickLine={false} axisLine={false} width={95} />
@@ -1855,7 +1947,7 @@ export default function App() {
 
             {showBM && (
               <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                <div style={{ width: "100%", maxWidth: 430, background: T.card, borderRadius: "20px 20px 0 0", padding: 24 }}>
+                <div style={{ width: "100%", maxWidth: shellMax, background: T.card, borderRadius: "20px 20px 0 0", padding: 24, boxSizing: "border-box" }}>
                   <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 18 }}>{bmCat ? `Set Budget — ${bmCat}` : "Set Budget"}</div>
                   <div style={{ marginBottom: 14 }}>
                     <label style={lbl}>Category</label>
@@ -1908,31 +2000,8 @@ export default function App() {
         )}
 
         {tab === "profile" && (
-          <div style={{ padding: `${px + 8}px ${px}px 180px` }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>Profile & Settings</div>
-              <button
-                type="button"
-                onClick={() => void signOut(auth)}
-                style={{
-                  flexShrink: 0,
-                  padding: "10px 14px",
-                  borderRadius: T.r,
-                  border: `1px solid ${T.dng}`,
-                  background: T.ddim,
-                  color: T.dng,
-                  fontSize: 13,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <LogOut size={16} />
-                Log out
-              </button>
-            </div>
+          <div style={{ padding: `${px + 8}px ${px}px 120px` }}>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 18 }}>Profile & Settings</div>
 
             <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "center", gap: 14 }}>
               <div
@@ -1954,40 +2023,64 @@ export default function App() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 17, fontWeight: 800 }}>{profileName.trim() || "—"}</div>
-                <div style={{ fontSize: 13, color: T.sub }}>{profileEmail.trim() || "—"}</div>
+                {profileEmail.trim() ? (
+                  <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>{profileEmail.trim()}</div>
+                ) : null}
+                {firebaseUser?.email ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: T.mut, marginBottom: 6 }}>Sign-in ID (other devices)</div>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <code
+                        style={{
+                          flex: 1,
+                          fontSize: 11,
+                          color: T.sub,
+                          wordBreak: "break-all",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {firebaseUser.email}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const t = firebaseUser.email || "";
+                          if (!t) return;
+                          void navigator.clipboard.writeText(t).then(() => {
+                            setSignInIdCopied(true);
+                            setTimeout(() => setSignInIdCopied(false), 2000);
+                          });
+                        }}
+                        style={{
+                          flexShrink: 0,
+                          padding: "6px 10px",
+                          borderRadius: T.r,
+                          border: `1px solid ${T.bdrH}`,
+                          background: T.surf,
+                          color: signInIdCopied ? T.acc : T.sub,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <Copy size={14} />
+                        {signInIdCopied ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={() => void signOut(auth)}
-              style={{
-                width: "100%",
-                marginBottom: 16,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-                padding: "14px 16px",
-                borderRadius: T.r,
-                border: `1px solid ${T.bdrH}`,
-                background: T.surf,
-                color: T.sub,
-                fontSize: 15,
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              <LogOut size={18} />
-              Log out
-            </button>
 
             <div style={{ ...card, marginBottom: 16 }}>
               <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Users on this device</div>
               <div style={{ fontSize: 12, color: T.sub, marginBottom: 12, lineHeight: 1.45 }}>
-                Names, UUIDs, and PINs are kept in this browser so you can switch accounts.{" "}
-                {"Each user's transactions are tagged with "}
-                <code style={{ color: T.acc }}>appProfileUuid</code> and stored under their Firebase account.
+                Names, PINs, and sign-in emails are saved in this browser for quick switching. Use{" "}
+                <strong style={{ color: T.txt }}>Sign-in ID</strong> above to sign in on another device. Transactions use{" "}
+                <code style={{ color: T.acc }}>appProfileUuid</code> in Firebase.
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {deviceProfiles.map((p) => {
@@ -2506,8 +2599,8 @@ export default function App() {
             left: "50%",
             transform: "translateX(-50%)",
             width: "100%",
-            maxWidth: 398,
-            padding: "0 16px",
+            maxWidth: Math.min(shellMax - 24, 520),
+            padding: `0 ${px}px`,
             zIndex: 150,
             pointerEvents: "none",
           }}
@@ -2538,47 +2631,6 @@ export default function App() {
         </div>
       ) : null}
 
-      {tab === "profile" ? (
-        <div
-          style={{
-            position: "fixed",
-            left: "50%",
-            transform: "translateX(-50%)",
-            bottom: 56,
-            width: "100%",
-            maxWidth: 430,
-            padding: "0 16px",
-            paddingBottom: "max(10px, env(safe-area-inset-bottom, 0px))",
-            zIndex: 100,
-            boxSizing: "border-box",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => void signOut(auth)}
-            style={{
-              width: "100%",
-              padding: "14px 16px",
-              borderRadius: T.rLg,
-              border: `2px solid ${T.dng}`,
-              background: T.ddim,
-              color: T.dng,
-              fontSize: 16,
-              fontWeight: 800,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
-            }}
-          >
-            <LogOut size={20} />
-            Log out of app
-          </button>
-        </div>
-      ) : null}
-
       <div
         style={{
           position: "fixed",
@@ -2586,15 +2638,16 @@ export default function App() {
           left: "50%",
           transform: "translateX(-50%)",
           width: "100%",
-          maxWidth: 430,
+          maxWidth: shellMax,
           background: `${T.surf}F0`,
           backdropFilter: "blur(24px)",
           borderTop: `1px solid ${T.bdr}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-around",
-          padding: "8px 4px",
+          padding: `8px 4px ${safeBottom}`,
           zIndex: 99,
+          boxSizing: "border-box",
         }}
       >
         {[

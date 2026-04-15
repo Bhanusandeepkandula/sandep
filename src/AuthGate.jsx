@@ -3,21 +3,24 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase.js";
 import { T, card, inp, lbl } from "./config.js";
 import {
   loadProfiles,
   saveProfiles,
   addProfile,
+  upsertProfile,
   pinToPassword,
   isValidPin,
   makeLoginEmail,
   profileDisplayName,
   PENDING_LOGIN_EMAIL_KEY,
 } from "./auth/pinProfiles.js";
+import { useShellLayout } from "./useShellLayout.js";
 
 export default function AuthGate() {
+  const { shellMax, px: padX, safeBottom } = useShellLayout();
   const [profiles, setProfiles] = useState(loadProfiles);
   const [tab, setTab] = useState(() => (loadProfiles().length ? "signin" : "signup"));
   const [label, setLabel] = useState("");
@@ -26,6 +29,7 @@ export default function AuthGate() {
   const [selectedEmail, setSelectedEmail] = useState(() => loadProfiles()[0]?.email || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remoteEmail, setRemoteEmail] = useState("");
 
   useEffect(() => {
     try {
@@ -111,6 +115,63 @@ export default function AuthGate() {
     }
   }
 
+  async function handleRemoteSignIn(e) {
+    e?.preventDefault?.();
+    setErr("");
+    const email = remoteEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      setErr("Enter your account email (from Profile on your other device, looks like u_…@pin.track.app).");
+      return;
+    }
+    if (!isValidPin(pin)) {
+      setErr("Enter your 4-digit PIN.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, pinToPassword(pin));
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error("No user after sign-in");
+      const snap = await getDoc(doc(db, "users", uid, "settings", "app"));
+      let name = "User";
+      let uuid = "";
+      if (snap.exists()) {
+        const d = snap.data() || {};
+        if (typeof d.profileName === "string" && d.profileName.trim()) name = d.profileName.trim();
+        if (typeof d.appProfileUuid === "string" && d.appProfileUuid.trim()) uuid = d.appProfileUuid.trim();
+      }
+      if (!uuid) {
+        uuid =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `id-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        await setDoc(
+          doc(db, "users", uid, "settings", "app"),
+          { budgets: {}, people: [], profileName: name, profileEmail: "", appProfileUuid: uuid },
+          { merge: true }
+        );
+      }
+      upsertProfile({ email, name, uuid, pin, createdAt: Date.now() });
+      refreshProfiles();
+      setSelectedEmail(email);
+      setPin("");
+      setRemoteEmail("");
+    } catch (e) {
+      const code = e?.code || "";
+      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+        setErr("Wrong PIN or account email.");
+      } else if (code === "auth/user-not-found") {
+        setErr("No account for that email. Check the address or use Sign up on this device.");
+      } else if (code === "auth/operation-not-allowed") {
+        setErr("Email/Password sign-in is disabled in Firebase Console.");
+      } else {
+        setErr(e?.message || String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleLogin(e) {
     e?.preventDefault?.();
     setErr("");
@@ -148,18 +209,23 @@ export default function AuthGate() {
     }
   }
 
-  const px = 20;
+  const px = padX;
 
   return (
     <div
       style={{
-        minHeight: "100vh",
-        maxWidth: 430,
+        minHeight: "100dvh",
+        width: "100%",
+        maxWidth: shellMax,
         margin: "0 auto",
+        boxSizing: "border-box",
         background: T.bg,
         color: T.txt,
         fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
-        padding: `${px + 24}px ${px}px 40px`,
+        paddingLeft: px,
+        paddingRight: px,
+        paddingTop: `calc(${px + 24}px + env(safe-area-inset-top, 0px))`,
+        paddingBottom: `max(40px, ${safeBottom})`,
         display: "flex",
         flexDirection: "column",
       }}
@@ -167,7 +233,8 @@ export default function AuthGate() {
       <div style={{ fontSize: 13, color: T.acc, fontWeight: 700, marginBottom: 8 }}>Track expense</div>
       <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 8 }}>Who&apos;s using this device?</div>
       <div style={{ fontSize: 14, color: T.sub, lineHeight: 1.5, marginBottom: 28 }}>
-        Same catalog for everyone. Each person has a UUID and their own expenses under their account. Names and PINs are stored on this device to switch users quickly.
+        Your data lives in Firebase under your account. This device keeps a short list of names and PINs for quick switching—use{" "}
+        <strong style={{ color: T.txt }}>Sign in with account email</strong> below when this list is empty (new phone or browser).
       </div>
 
       <div
@@ -357,9 +424,53 @@ export default function AuthGate() {
       ) : null}
 
       {tab === "signin" && profiles.length === 0 ? (
-        <div style={{ ...card, color: T.sub, fontSize: 14, lineHeight: 1.5 }}>
-          No profile on this device yet. Open the <strong style={{ color: T.txt }}>Sign up</strong> tab to create one.
-        </div>
+        <form onSubmit={(e) => void handleRemoteSignIn(e)} style={{ ...card, marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Sign in with account email</div>
+          <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
+            Use the same email and PIN as on your other device. Find the email under Profile → <strong style={{ color: T.txt }}>Sign-in ID</strong> (looks like{" "}
+            <code style={{ color: T.acc }}>u_…@pin.track.app</code>).
+          </div>
+          <label style={lbl}>Account email</label>
+          <input
+            type="email"
+            autoComplete="username"
+            inputMode="email"
+            value={remoteEmail}
+            onChange={(e) => setRemoteEmail(e.target.value)}
+            placeholder="u_abc…@pin.track.app"
+            style={{ ...inp, marginBottom: 14, fontSize: 14, fontFamily: "ui-monospace,monospace" }}
+          />
+          <label style={lbl}>4-digit PIN</label>
+          <input
+            inputMode="numeric"
+            autoComplete="current-password"
+            maxLength={4}
+            placeholder="••••"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            style={{ ...inp, marginBottom: 18, letterSpacing: 8, fontSize: 22, fontWeight: 800 }}
+          />
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              width: "100%",
+              padding: 14,
+              borderRadius: T.r,
+              background: busy ? T.mut : T.acc,
+              border: "none",
+              color: "#000",
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+          <div style={{ fontSize: 12, color: T.sub, marginTop: 14, lineHeight: 1.5 }}>
+            New here? Open <strong style={{ color: T.txt }}>Sign up</strong> to create a profile on this device.
+          </div>
+        </form>
       ) : null}
     </div>
   );

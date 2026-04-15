@@ -77,3 +77,37 @@ export function addProfile(profile) {
   });
   saveProfiles(next);
 }
+
+/** Add or update a profile by email (e.g. after signing in on a new device). */
+export function upsertProfile(profile) {
+  const email = String(profile?.email || "").trim();
+  if (!email) return;
+  const list = loadProfiles();
+  const idx = list.findIndex((p) => p.email === email);
+  const pin =
+    typeof profile.pin === "string" && profile.pin
+      ? profile.pin
+      : idx >= 0
+        ? list[idx].pin
+        : "";
+  const entry = {
+    uuid:
+      typeof profile.uuid === "string" && profile.uuid.trim()
+        ? profile.uuid.trim()
+        : idx >= 0 && list[idx].uuid
+          ? list[idx].uuid
+          : typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `id-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    email,
+    name: (profile.name || "User").trim() || "User",
+    pin,
+    createdAt: idx >= 0 ? list[idx].createdAt : (typeof profile.createdAt === "number" ? profile.createdAt : Date.now()),
+  };
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...entry };
+  } else {
+    list.push(entry);
+  }
+  saveProfiles(list);
+}

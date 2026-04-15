@@ -25,7 +25,6 @@ export default function AuthGate() {
   const [tab, setTab] = useState(() => (loadProfiles().length ? "signin" : "signup"));
   const [label, setLabel] = useState("");
   const [pin, setPin] = useState("");
-  const [pin2, setPin2] = useState("");
   const [selectedEmail, setSelectedEmail] = useState(() => loadProfiles()[0]?.email || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -70,10 +69,6 @@ export default function AuthGate() {
       setErr("PIN must be exactly 4 digits.");
       return;
     }
-    if (pin !== pin2) {
-      setErr("PIN and confirmation do not match.");
-      return;
-    }
     setBusy(true);
     try {
       const email = makeLoginEmail();
@@ -100,13 +95,12 @@ export default function AuthGate() {
       refreshProfiles();
       setLabel("");
       setPin("");
-      setPin2("");
       setTab("signin");
       setSelectedEmail(email);
     } catch (e) {
       const code = e?.code || "";
       if (code === "auth/operation-not-allowed") {
-        setErr("Email/Password sign-in is disabled. Enable it in Firebase Console → Authentication → Sign-in method.");
+        setErr("Account sign-in is disabled. In Firebase Console → Authentication → Sign-in method, enable Email/Password (the app uses it only in the background).");
       } else {
         setErr(e?.message || String(e));
       }
@@ -233,8 +227,15 @@ export default function AuthGate() {
       <div style={{ fontSize: 13, color: T.acc, fontWeight: 700, marginBottom: 8 }}>Track expense</div>
       <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 8 }}>Who&apos;s using this device?</div>
       <div style={{ fontSize: 14, color: T.sub, lineHeight: 1.5, marginBottom: 28 }}>
-        Your data lives in Firebase under your account. This device keeps a short list of names and PINs for quick switching—use{" "}
-        <strong style={{ color: T.txt }}>Sign in with account email</strong> below when this list is empty (new phone or browser).
+        {tab === "signup" ? (
+          <>
+            Choose <strong style={{ color: T.txt }}>Sign up</strong> to enter your display name and a PIN. We create a private cloud account for you—no email address to type.
+          </>
+        ) : (
+          <>
+            Pick your profile and enter your PIN. On a <strong style={{ color: T.txt }}>new device</strong> with no profiles here, use <strong style={{ color: T.txt }}>Sign-in ID</strong> (from Profile on your old device) plus PIN below.
+          </>
+        )}
       </div>
 
       <div
@@ -372,32 +373,33 @@ export default function AuthGate() {
       ) : null}
 
       {tab === "signup" ? (
-        <form onSubmit={(e) => void handleCreate(e)} style={{ ...card, marginBottom: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Create a profile</div>
+        <form
+          autoComplete="off"
+          onSubmit={(e) => void handleCreate(e)}
+          style={{ ...card, marginBottom: 0 }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Create your profile</div>
           <label style={lbl}>Your name</label>
           <input
+            name="displayName"
+            autoComplete="name"
+            autoCapitalize="words"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. Sandeep"
             style={{ ...inp, marginBottom: 14 }}
           />
-          <label style={lbl}>4-digit PIN</label>
+          <label style={lbl}>Choose a 4-digit PIN</label>
           <input
+            name="appPin"
             inputMode="numeric"
-            autoComplete="new-password"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             maxLength={4}
             placeholder="••••"
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-            style={{ ...inp, marginBottom: 14, letterSpacing: 8, fontSize: 22, fontWeight: 800 }}
-          />
-          <label style={lbl}>Confirm PIN</label>
-          <input
-            inputMode="numeric"
-            maxLength={4}
-            placeholder="••••"
-            value={pin2}
-            onChange={(e) => setPin2(e.target.value.replace(/\D/g, "").slice(0, 4))}
             style={{ ...inp, marginBottom: 18, letterSpacing: 8, fontSize: 22, fontWeight: 800 }}
           />
           <button
@@ -415,29 +417,30 @@ export default function AuthGate() {
               cursor: busy ? "not-allowed" : "pointer",
             }}
           >
-            {busy ? "Creating…" : "Create & sign in"}
+            {busy ? "Creating…" : "Continue"}
           </button>
           <div style={{ fontSize: 11, color: T.mut, marginTop: 12, lineHeight: 1.45 }}>
-            PIN + name are saved on this device for switching. Enable Email/Password in Firebase Authentication.
+            PIN protects your data. Your display name is saved on this device for quick switching.
           </div>
         </form>
       ) : null}
 
       {tab === "signin" && profiles.length === 0 ? (
-        <form onSubmit={(e) => void handleRemoteSignIn(e)} style={{ ...card, marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Sign in with account email</div>
+        <form autoComplete="off" onSubmit={(e) => void handleRemoteSignIn(e)} style={{ ...card, marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Already have an account on another device?</div>
           <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-            Use the same email and PIN as on your other device. Find the email under Profile → <strong style={{ color: T.txt }}>Sign-in ID</strong> (looks like{" "}
-            <code style={{ color: T.acc }}>u_…@pin.track.app</code>).
+            Paste your <strong style={{ color: T.txt }}>Sign-in ID</strong> from Profile on the other device (starts with <code style={{ color: T.acc }}>u_</code>), then your PIN.
           </div>
-          <label style={lbl}>Account email</label>
+          <label style={lbl}>Sign-in ID</label>
           <input
-            type="email"
-            autoComplete="username"
-            inputMode="email"
+            type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="text"
             value={remoteEmail}
             onChange={(e) => setRemoteEmail(e.target.value)}
-            placeholder="u_abc…@pin.track.app"
+            placeholder="u_…@pin.track.app"
             style={{ ...inp, marginBottom: 14, fontSize: 14, fontFamily: "ui-monospace,monospace" }}
           />
           <label style={lbl}>4-digit PIN</label>

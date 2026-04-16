@@ -1382,19 +1382,20 @@ export default function App() {
       setOcrCsvErr("Paste OCR text or run OCR on an image first.");
       return;
     }
-    const y = ocrDateYear.trim();
-    if (!/^\d{4}$/.test(y) || Number(y) < 1990 || Number(y) > 2100) {
-      setOcrCsvErr("Enter a valid 4-digit year (e.g. 2026) for these transactions before converting.");
-      return;
-    }
     setOcrCsvBusy(true);
     try {
       const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
       const payNames = (catalogRef.current.payments || []).filter(Boolean);
-      const dateContext = {
-        year: y,
-        ...(ocrDateMonth.trim() ? { month: ocrDateMonth.trim().padStart(2, "0") } : {}),
-      };
+      const y = ocrDateYear.trim();
+      const yearOk = /^\d{4}$/.test(y) && Number(y) >= 1990 && Number(y) <= 2100;
+      const m = ocrDateMonth.trim();
+      const dateContext =
+        yearOk || m
+          ? {
+              ...(yearOk ? { year: y } : {}),
+              ...(m ? { month: m.padStart(2, "0") } : {}),
+            }
+          : undefined;
       const { csv, followUpQuestions } = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
         categories: catNames,
         payments: payNames,
@@ -2732,7 +2733,7 @@ export default function App() {
                     marginBottom: 12,
                   }}
                 />
-                <label style={lbl}>Date context (required before AI — avoids wrong year on bank screenshots)</label>
+                <label style={lbl}>Date context (optional)</label>
                 <div
                   style={{
                     display: "grid",
@@ -2742,14 +2743,14 @@ export default function App() {
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Year for rows without a year in OCR</div>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Year for dates missing a year (defaults to current year)</div>
                     <input
                       type="text"
                       inputMode="numeric"
                       maxLength={4}
                       value={ocrDateYear}
                       onChange={(e) => setOcrDateYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      placeholder="2026"
+                      placeholder={String(new Date().getFullYear())}
                       style={{ ...inp, width: "100%", minHeight: 44 }}
                     />
                   </div>
@@ -2781,7 +2782,7 @@ export default function App() {
                       lineHeight: 1.4,
                     }}
                   >
-                    No 4-digit year found in the text above — confirm the year on the left before converting.
+                    No 4-digit year found in the text above — we’ll assume the current year unless you change it.
                   </div>
                 ) : null}
                 <button

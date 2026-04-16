@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { applyTheme } from "./config.js";
+import { DialogProvider } from "./AppDialogs.jsx";
 import App from "./App.jsx";
 
 try {
@@ -21,7 +22,9 @@ function dismissSplash() {
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App onReady={dismissSplash} />
+    <DialogProvider>
+      <App onReady={dismissSplash} />
+    </DialogProvider>
   </StrictMode>
 );
 

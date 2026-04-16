@@ -82,6 +82,7 @@ export function SplitQrScanModal({ open, onClose, onDecoded }) {
         alignItems: "center",
         justifyContent: "center",
         padding: 16,
+        animation: "fade-in .2s ease",
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -97,6 +98,7 @@ export function SplitQrScanModal({ open, onClose, onDecoded }) {
           padding: 20,
           border: `1px solid ${T.bdr}`,
           boxSizing: "border-box",
+          animation: "fade-in .2s ease, sheet-up .3s cubic-bezier(.22,1,.36,1)",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>

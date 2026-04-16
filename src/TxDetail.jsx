@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Trash2, Users, Pencil, Check, ImageIcon, ShoppingBag, CheckCircle2 } from "lucide-react";
+import { useDialog } from "./AppDialogs.jsx";
 import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 import { CategoryIcon } from "./categoryIcons.jsx";
@@ -25,6 +26,7 @@ export function TxDetail({
   const [imgOpen, setImgOpen] = useState(false);
   const [splitSaved, setSplitSaved] = useState(false);
   const splitTimerRef = useRef(null);
+  const dlg = useDialog();
 
   useEffect(() => { setEditing(false); setEditDraft(null); }, [tx?.id]);
 
@@ -93,7 +95,7 @@ export function TxDetail({
     if (splitType === "custom") {
       const sum = splitPpl.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
       if (Math.abs(sum - txAmt) > 0.02) {
-        window.alert(`Custom amounts should add up to ${formatMoney(txAmt)} (currently ${formatMoney(sum)}).`);
+        dlg.toast(`Custom amounts should add up to ${formatMoney(txAmt)} (currently ${formatMoney(sum)}).`, { type: "warn", duration: 4000 });
         return;
       }
     }
@@ -115,8 +117,8 @@ export function TxDetail({
 
   return (
     <>
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 9000, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.surf, borderRadius: "20px 20px 0 0", maxHeight: "92vh", overflowY: "auto", WebkitOverflowScrolling: "touch", borderTop: `1px solid ${T.bdr}` }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 9000, display: "flex", flexDirection: "column", justifyContent: "flex-end", animation: "fade-in .2s ease" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.surf, borderRadius: "20px 20px 0 0", maxHeight: "92vh", overflowY: "auto", WebkitOverflowScrolling: "touch", borderTop: `1px solid ${T.bdr}`, animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)" }}>
         {/* Handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}>
           <div style={{ width: 36, height: 4, borderRadius: 99, background: T.mut }} />

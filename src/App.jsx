@@ -89,6 +89,7 @@ import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import { CategoryIcon } from "./categoryIcons.jsx";
 import { SpendingReport } from "./SpendingReport.jsx";
+import { useDialog } from "./AppDialogs.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -214,6 +215,7 @@ function sanitizeForFirestore(obj) {
 }
 
 export default function App({ onReady }) {
+  const dlg = useDialog();
   const [tab, setTabRaw] = useState("home");
   const setTab = useCallback((t) => {
     setTabRaw((prev) => {
@@ -248,7 +250,6 @@ export default function App({ onReady }) {
   const [fErr, setFErr] = useState("");
   const [savingExpense, setSavingExpense] = useState(false);
   /** Brief confirmation after save when navigating to Home. */
-  const [saveToast, setSaveToast] = useState(null);
   const [splitOn, setSplitOn] = useState(false);
   const [splitType, setSplitType] = useState("equal");
   const [splitPpl, setSplitPpl] = useState([]);
@@ -344,7 +345,6 @@ export default function App({ onReady }) {
   const [deleteAcctPin, setDeleteAcctPin] = useState("");
   const [deleteAcctErr, setDeleteAcctErr] = useState("");
   const [deleteAcctBusy, setDeleteAcctBusy] = useState(false);
-  const [dataToast, setDataToast] = useState("");
   const [showProfileQr, setShowProfileQr] = useState(false);
   const [profileQrCopied, setProfileQrCopied] = useState(false);
   const [showSplitScan, setShowSplitScan] = useState(false);
@@ -406,11 +406,11 @@ export default function App({ onReady }) {
   const copyExternalLlmImagePrompt = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(externalLlmImagePrompt);
-      setDataToast("Copied prompt — open any AI, paste, attach your image, then paste CSV back here");
-      window.setTimeout(() => setDataToast(""), 3200);
+      dlg.toast("Copied prompt — open any AI, paste, attach your image, then paste CSV back here", { type: "success" });
+      
     } catch {
-      setDataToast("Could not copy — select the gray box text and copy manually");
-      window.setTimeout(() => setDataToast(""), 3200);
+      dlg.toast("Could not copy — select the gray box text and copy manually", { type: "warn" });
+      
     }
   }, [externalLlmImagePrompt]);
 
@@ -722,21 +722,21 @@ export default function App({ onReady }) {
   async function handleSplitContactDecoded(rawText) {
     const parsed = parseSplitSharePayload(rawText);
     if (!parsed?.n) {
-      window.alert("Invalid code. Ask your friend to open Profile and tap the QR icon.");
+      dlg.toast("Invalid code. Ask your friend to open Profile and tap the QR icon.", { type: "error" });
       setShowSplitScan(false);
       return;
     }
     const selfEmail = (firebaseUser?.email || "").trim();
     const selfU = (profileTagUuid || "").trim();
     if (parsed.e && selfEmail && parsed.e === selfEmail && parsed.u && selfU && parsed.u === selfU) {
-      window.alert("That's your own code.");
+      dlg.toast("That's your own code.", { type: "warn" });
       setShowSplitScan(false);
       return;
     }
     const entry = normalizePerson({ n: parsed.n, e: parsed.e || undefined, u: parsed.u || undefined });
     const list = people.map(normalizePerson);
     if (list.some((x) => sameSplitPerson(x, entry))) {
-      window.alert(`${entry.n} is already in your split contacts.`);
+      dlg.toast(`${entry.n} is already in your split contacts.`, { type: "warn" });
       setShowSplitScan(false);
       return;
     }
@@ -801,7 +801,7 @@ export default function App({ onReady }) {
       }
     } catch (e) {
       console.error(e);
-      window.alert("Could not save split. Check your connection.");
+      dlg.toast("Could not save split. Check your connection.", { type: "error" });
     }
   }
 
@@ -1024,8 +1024,8 @@ export default function App({ onReady }) {
       setDeleteAllModal(false);
       setDeleteAllPin("");
       setDeleteAllErr("");
-      setDataToast("All expenses deleted for this account.");
-      setTimeout(() => setDataToast(""), 4500);
+      dlg.toast("All expenses deleted for this account.", { type: "success" });
+      
     } catch (e) {
       const code = e?.code || "";
       if (
@@ -1106,8 +1106,8 @@ export default function App({ onReady }) {
       setPreviewImg(null);
       setScanLineItems(null);
       setTab("home");
-      setSaveToast(`${formatMoney(newTx.amount)} · ${newTx.category}`);
-      setTimeout(() => setSaveToast(null), 4500);
+      dlg.toast(`Saved ${formatMoney(newTx.amount)} · ${newTx.category}`, { type: "success" });
+      
     }, 2400);
   }
 
@@ -1678,8 +1678,8 @@ export default function App({ onReady }) {
       const pay = catalogRef.current.payments[0] || "";
       setForm({ amount: "", category: "", date: tdStr(), payment: pay, notes: "", tags: "" });
       setTab("home");
-      setSaveToast(`Imported ${count} · ${formatMoney(totalAmount)}`);
-      setTimeout(() => setSaveToast(null), 4500);
+      dlg.toast(`Imported ${count} · ${formatMoney(totalAmount)}`, { type: "success" });
+      
     }, 2400);
   }
 
@@ -1954,7 +1954,7 @@ export default function App({ onReady }) {
   }
 
   async function removeMonthlyBudgetTotal() {
-    if (!window.confirm("Remove your overall monthly spending cap? The ring on Home will be hidden until you set a new cap.")) return;
+    if (!await dlg.confirm("Remove your overall monthly spending cap? The ring on Home will be hidden until you set a new cap.", { title: "Remove Cap", danger: true, confirmLabel: "Remove" })) return;
     if (uidRef.current) {
       try {
         await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { monthlyBudgetTotal: deleteField() }, { merge: true });
@@ -1969,7 +1969,7 @@ export default function App({ onReady }) {
 
   async function removeBudgetCategory(cat) {
     if (!cat || !(cat in budgets)) return;
-    if (!window.confirm(`Remove the monthly budget for “${cat}”?`)) return;
+    if (!await dlg.confirm(`Remove the budget for "${cat}"?`, { title: "Remove Budget", danger: true, confirmLabel: "Remove" })) return;
     const next = { ...budgets };
     delete next[cat];
     if (uidRef.current) {
@@ -1986,7 +1986,7 @@ export default function App({ onReady }) {
   async function clearAllBudgets() {
     const keys = Object.keys(budgets);
     if (keys.length === 0) return;
-    if (!window.confirm(`Remove all ${keys.length} category budget${keys.length === 1 ? "" : "s"}? Monthly limits will be cleared.`)) return;
+    if (!await dlg.confirm(`Remove all ${keys.length} category budget${keys.length === 1 ? "" : "s"}? Monthly limits will be cleared.`, { title: "Clear Budgets", danger: true, confirmLabel: "Clear All" })) return;
     if (uidRef.current) {
       try {
         await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { budgets: {} }, { merge: true });
@@ -2018,7 +2018,7 @@ export default function App({ onReady }) {
   }
 
   async function removeFixedExpense(name) {
-    if (!window.confirm(`Remove "${name}" from fixed expenses?`)) return;
+    if (!await dlg.confirm(`Remove "${name}" from fixed expenses?`, { title: "Remove Expense", danger: true, confirmLabel: "Remove" })) return;
     const next = fixedExpenses.filter((f) => f.name !== name);
     if (uidRef.current) {
       try {
@@ -4702,6 +4702,7 @@ export default function App({ onReady }) {
             display: "flex",
             alignItems: "flex-end",
             justifyContent: "center",
+            animation: "fade-in .2s ease",
           }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowFixedModal(false); }}
         >
@@ -4718,6 +4719,7 @@ export default function App({ onReady }) {
               padding: 24,
               paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
+              animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)",
             }}
           >
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 18, display: "flex", alignItems: "center", gap: 8 }}>
@@ -4840,7 +4842,7 @@ export default function App({ onReady }) {
         <div
           role="dialog"
           aria-modal="true"
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 500, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 500, animation: "fade-in .2s ease", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowCurrencyPicker(false); }}
         >
           <div
@@ -4856,6 +4858,7 @@ export default function App({ onReady }) {
               padding: "20px 0 0",
               paddingBottom: "max(20px, calc(12px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
+              animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)",
             }}
           >
             <div style={{ padding: "0 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4917,6 +4920,7 @@ export default function App({ onReady }) {
             alignItems: "center",
             justifyContent: "center",
             padding: 16,
+            animation: "fade-in .2s ease",
           }}
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowProfileQr(false);
@@ -4932,6 +4936,7 @@ export default function App({ onReady }) {
               padding: 22,
               border: `1px solid ${T.bdr}`,
               boxSizing: "border-box",
+              animation: "fade-in .2s ease, sheet-up .3s cubic-bezier(.22,1,.36,1)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
@@ -5124,10 +5129,10 @@ export default function App({ onReady }) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-acct-title"
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 520, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 520, animation: "fade-in .2s ease", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={(e) => { if (e.target === e.currentTarget && !deleteAcctBusy) { setDeleteAcctModal(false); setDeleteAcctPin(""); setDeleteAcctErr(""); } }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.card, borderRadius: T.rLg, padding: 22, border: `1px solid ${T.dng}`, boxSizing: "border-box" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.card, borderRadius: T.rLg, padding: 22, border: `1px solid ${T.dng}`, boxSizing: "border-box", animation: "fade-in .2s ease, sheet-up .3s cubic-bezier(.22,1,.36,1)" }}>
             <div id="delete-acct-title" style={{ fontSize: 17, fontWeight: 800, marginBottom: 8, color: T.dng }}>
               Delete your account?
             </div>
@@ -5176,54 +5181,7 @@ export default function App({ onReady }) {
         </div>
       ) : null}
 
-      {saveToast || dataToast ? (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            bottom: 96,
-            left: 0,
-            right: 0,
-            width: "100%",
-            maxWidth: Math.min(Math.max(0, vw - 32), 520),
-            marginLeft: "auto",
-            marginRight: "auto",
-            padding: `0 ${px}px`,
-            zIndex: 150,
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            className="pop"
-            style={{
-              background: T.card2,
-              border: `1px solid ${T.acc}`,
-              color: T.txt,
-              borderRadius: T.rLg,
-              padding: "12px 16px",
-              fontSize: 14,
-              fontWeight: 600,
-              textAlign: "center",
-              boxShadow: T.id === "light" ? "0 12px 40px rgba(0,0,0,0.15)" : "0 12px 40px rgba(0,0,0,0.45)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-            }}
-          >
-            <Check size={18} color={T.acc} strokeWidth={3} />
-            <span>
-              {dataToast ? (
-                <span style={{ color: T.acc }}>{dataToast}</span>
-              ) : (
-                <>
-                  Expense saved — <span style={{ color: T.acc }}>{saveToast}</span>
-                </>
-              )}
-            </span>
-          </div>
-        </div>
-      ) : null}
+      {/* Toasts handled by DialogProvider */}
 
       <div
         style={{

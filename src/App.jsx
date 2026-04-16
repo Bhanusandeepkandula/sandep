@@ -852,8 +852,17 @@ export default function App({ onReady }) {
     }
     const entry = normalizePerson({ n: parsed.n, e: parsed.e || undefined, u: parsed.u || undefined, fuid: parsed.fuid || undefined });
     const list = people.map(normalizePerson);
-    if (list.some((x) => sameSplitPerson(x, entry))) {
-      dlg.toast(`${entry.n} is already in your split contacts.`, { type: "warn" });
+    const existingIdx = list.findIndex((x) => sameSplitPerson(x, entry));
+    if (existingIdx !== -1) {
+      const existing = list[existingIdx];
+      // If the new QR has fuid but the stored contact doesn't, upgrade it silently
+      if (entry.fuid && !existing.fuid) {
+        const upgraded = list.map((x, i) => i === existingIdx ? { ...x, fuid: entry.fuid } : x);
+        await persistPeople(upgraded);
+        dlg.toast(`${entry.n}'s profile link updated.`, { type: "success" });
+      } else {
+        dlg.toast(`${entry.n} is already in your split contacts.`, { type: "warn" });
+      }
       setShowSplitScan(false);
       return;
     }
@@ -880,10 +889,16 @@ export default function App({ onReady }) {
       splitPayload && splitPayload.people?.length
         ? {
             type: splitPayload.type === "custom" ? "custom" : "equal",
-            people: splitPayload.people.map((p) => ({
-              n: String(p.n || "").trim(),
-              a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0,
-            })),
+            people: splitPayload.people.map((p) => {
+              const out = {
+                n: String(p.n || "").trim(),
+                a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0,
+              };
+              if (p.fuid) out.fuid = String(p.fuid).trim();
+              if (p.u) out.u = String(p.u).trim();
+              if (p.e) out.e = String(p.e).trim();
+              return out;
+            }),
           }
         : null;
 
@@ -2226,7 +2241,12 @@ export default function App({ onReady }) {
   function toggleSplitPerson(name) {
     setSplitPpl((prev) => {
       const ex = prev.find((p) => p.n === name);
-      const nl = ex ? prev.filter((p) => p.n !== name) : [...prev, { n: name, a: 0 }];
+      const nl = ex ? prev.filter((p) => p.n !== name) : (() => {
+        // Carry fuid/u/e from the contact so mirror writes work without name-match lookup
+        const contact = people.map(normalizePerson).find((p) => p.n === name);
+        const base = contact ? { n: contact.n, a: 0, ...(contact.fuid ? { fuid: contact.fuid } : {}), ...(contact.u ? { u: contact.u } : {}), ...(contact.e ? { e: contact.e } : {}) } : { n: name, a: 0 };
+        return [...prev, base];
+      })();
       if (splitType === "equal" && form.amount && nl.length > 0) {
         const each = parseFloat(form.amount) / (nl.length + 1);
         const rounded = Math.round(each * 100) / 100;

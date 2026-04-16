@@ -82,7 +82,13 @@ export function TxDetail({
 
   function openSplitEditor() {
     if (hasSavedSplit) {
-      setSplitPpl(tx.split.people.map((p) => ({ n: p.n, a: typeof p.a === "number" ? p.a : parseFloat(String(p.a)) || 0 })));
+      setSplitPpl(tx.split.people.map((p) => {
+        const out = { n: p.n, a: typeof p.a === "number" ? p.a : parseFloat(String(p.a)) || 0 };
+        if (p.fuid) out.fuid = p.fuid;
+        if (p.u) out.u = p.u;
+        if (p.e) out.e = p.e;
+        return out;
+      }));
       setSplitType(tx.split.type === "custom" ? "custom" : "equal");
     } else {
       setSplitPpl([]);
@@ -125,7 +131,13 @@ export function TxDetail({
         return;
       }
     }
-    onSaveSplit(tx.id, { type: splitType, people: splitPpl.map((p) => ({ n: p.n, a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0 })) });
+    onSaveSplit(tx.id, { type: splitType, people: splitPpl.map((p) => {
+      const out = { n: p.n, a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0 };
+      if (p.fuid) out.fuid = p.fuid;
+      if (p.u) out.u = p.u;
+      if (p.e) out.e = p.e;
+      return out;
+    }) });
     setSplitSaved(true);
     setSplitEditing(false);
     if (splitTimerRef.current) clearTimeout(splitTimerRef.current);

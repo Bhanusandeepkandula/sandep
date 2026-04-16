@@ -1957,6 +1957,17 @@ export default function App({ onReady }) {
     const email = firebaseUser?.email;
     if (!email) { setDeleteAcctErr("Not signed in."); return; }
     if (!isValidPin(deleteAcctPin)) { setDeleteAcctErr("Enter your 4-digit PIN."); return; }
+    /* Hard guard: re-check open split balances here (not just in the UI) so
+     * that even a stale modal can't delete an account with unsettled bills. */
+    const theyOwe = splitAnalytics?.outstandingToYou || 0;
+    const youOwe = splitAnalytics?.outstandingFromYou || 0;
+    if (theyOwe > 0.005 || youOwe > 0.005) {
+      const parts = [];
+      if (theyOwe > 0.005) parts.push(`${formatMoney(theyOwe)} owed to you`);
+      if (youOwe > 0.005) parts.push(`${formatMoney(youOwe)} you still owe`);
+      setDeleteAcctErr(`Settle every split first — ${parts.join(" · ")}.`);
+      return;
+    }
     setDeleteAcctBusy(true);
     try {
       const cred = EmailAuthProvider.credential(email, pinToPassword(deleteAcctPin));
@@ -5921,18 +5932,105 @@ export default function App({ onReady }) {
                   <div style={{ fontSize: 11, color: T.sub }}>{txs.length} transactions · requires PIN</div>
                 </div>
               </button>
-              <button
-                type="button"
-                disabled={!firebaseUser?.email || fbStatus !== "ready"}
-                onClick={() => { setDeleteAcctErr(""); setDeleteAcctPin(""); setDeleteAcctModal(true); }}
-                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}`, background: T.dng, cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
-              >
-                <Trash2 size={18} color="#fff" />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Delete account</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>Permanently remove all data & account</div>
-                </div>
-              </button>
+              {(() => {
+                /* Guard against account deletion when the user has any open
+                 * split balances on either side — deleting now would strand
+                 * peer records (master leaves, peers can never settle) or
+                 * strand debts (slave leaves without paying back). The UI
+                 * blocks the action AND the underlying call re-checks this
+                 * in confirmDeleteAccount so the guard can't be bypassed. */
+                const theyOwe = splitAnalytics?.outstandingToYou || 0;
+                const youOwe = splitAnalytics?.outstandingFromYou || 0;
+                const hasOpenSplits = theyOwe > 0.005 || youOwe > 0.005;
+                const baseDisabled = !firebaseUser?.email || fbStatus !== "ready";
+                const disabled = baseDisabled || hasOpenSplits;
+                return (
+                  <>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => {
+                        if (hasOpenSplits) {
+                          const parts = [];
+                          if (theyOwe > 0.005) parts.push(`${formatMoney(theyOwe)} owed to you`);
+                          if (youOwe > 0.005) parts.push(`${formatMoney(youOwe)} you still owe`);
+                          dlg.toast(
+                            `Settle open splits first: ${parts.join(" · ")}`,
+                            { type: "error", title: "Can't delete yet", duration: 6000 }
+                          );
+                          return;
+                        }
+                        setDeleteAcctErr("");
+                        setDeleteAcctPin("");
+                        setDeleteAcctModal(true);
+                      }}
+                      aria-disabled={disabled}
+                      title={
+                        hasOpenSplits
+                          ? "Settle every split first — you have open balances"
+                          : undefined
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "12px 12px",
+                        borderRadius: T.r,
+                        border: `1px solid ${hasOpenSplits ? `${T.dng}66` : T.dng}`,
+                        background: hasOpenSplits ? T.ddim : T.dng,
+                        cursor: disabled ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        textAlign: "left",
+                        opacity: baseDisabled ? 0.5 : 1,
+                      }}
+                    >
+                      <Trash2 size={18} color={hasOpenSplits ? T.dng : "#fff"} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: hasOpenSplits ? T.dng : "#fff" }}>
+                          Delete account
+                        </div>
+                        <div style={{ fontSize: 11, color: hasOpenSplits ? T.sub : "rgba(255,255,255,0.7)" }}>
+                          {hasOpenSplits
+                            ? "Blocked — settle every split first"
+                            : "Permanently remove all data & account"}
+                        </div>
+                      </div>
+                    </button>
+                    {hasOpenSplits ? (
+                      <div
+                        role="alert"
+                        style={{
+                          marginTop: 10,
+                          padding: "10px 12px",
+                          borderRadius: T.r,
+                          background: T.ddim,
+                          border: `1px solid ${T.dng}55`,
+                          fontSize: 12,
+                          color: T.dng,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                          You have open split balances
+                        </div>
+                        {theyOwe > 0.005 ? (
+                          <div style={{ color: T.sub, marginBottom: youOwe > 0.005 ? 4 : 0 }}>
+                            • <strong style={{ color: T.txt }}>{formatMoney(theyOwe)}</strong> still owed to you by peers
+                          </div>
+                        ) : null}
+                        {youOwe > 0.005 ? (
+                          <div style={{ color: T.sub }}>
+                            • <strong style={{ color: T.txt }}>{formatMoney(youOwe)}</strong> you still owe to peers
+                          </div>
+                        ) : null}
+                        <div style={{ color: T.sub, marginTop: 6, fontSize: 11 }}>
+                          Settle or clear every split transaction before deleting so nobody is left stranded.
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
             </div>
 
             {(footerLine1 || footerLine2) && (

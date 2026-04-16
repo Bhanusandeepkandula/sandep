@@ -52,6 +52,7 @@ import { convertOcrToCsv } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 import { extractTextFromFile } from "./docExtract.js";
+import { TxDetail } from "./TxDetail.jsx";
 
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 
@@ -117,6 +118,8 @@ export default function App() {
   const [importSaving, setImportSaving] = useState(false);
   /** When set, success screen shows bulk-import copy. */
   const [bulkSuccess, setBulkSuccess] = useState(null);
+
+  const [selectedTx, setSelectedTx] = useState(null);
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -589,6 +592,7 @@ export default function App() {
       tags: form.tags ? form.tags.split(",").map((s) => s.trim()) : [],
       split: splitNormalized,
       appProfileUuid: tagUuid,
+      lineItems: Array.isArray(scanLineItems) && scanLineItems.length ? scanLineItems : [],
     };
     if (!uidRef.current) {
       if (fbStatus !== "error") {
@@ -605,10 +609,14 @@ export default function App() {
       let receiptUrl = "";
       if (previewImg) {
         try {
-          receiptUrl = await uploadReceiptImage(previewImg, uidRef.current, newTx.id);
+          // Race against a 12-second timeout so a hung Storage upload never blocks saving
+          receiptUrl = await Promise.race([
+            uploadReceiptImage(previewImg, uidRef.current, newTx.id),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Upload timed out")), 12000)),
+          ]);
         } catch (e) {
           console.error(e);
-          setScanErr("Receipt photo could not be uploaded (deploy Storage rules). Saving without attachment.");
+          // Non-fatal — continue saving the expense without the photo
         }
       }
       if (receiptUrl) newTx.receiptUrl = receiptUrl;
@@ -696,19 +704,37 @@ export default function App() {
       if (isStatement) {
         scanPhaseOrderRef.current = ["read", "ocr", "ai", "parse"];
         setScanPhase("ocr");
-        const text = await extractTextFromFile(f);
+        let text;
+        try {
+          text = await extractTextFromFile(f);
+        } catch (extractErr) {
+          if (scanCancelledRef.current) return;
+          setScanErr(extractErr instanceof Error ? extractErr.message : "Could not read this file. Try exporting as CSV from your bank app.");
+          setScanPhase(null);
+          setStep("mode");
+          return;
+        }
         if (scanCancelledRef.current) return;
 
         setScanPhase("ai");
-        const csv = await convertOcrToCsv(text, { categories: catNames, payments: payNames });
+        let csv;
+        try {
+          csv = await convertOcrToCsv(text, { categories: catNames, payments: payNames });
+        } catch (aiErr) {
+          if (scanCancelledRef.current) return;
+          setScanErr(aiErr instanceof Error ? aiErr.message : "AI conversion failed. Try again.");
+          setScanPhase(null);
+          setStep("mode");
+          return;
+        }
         if (scanCancelledRef.current) return;
 
         setScanPhase("parse");
         const { rows, fatal } = parseExpenseCsv(csv, { categories: catNames, payments: payNames });
         if (fatal || rows.filter((r) => r.ok).length === 0) {
-          setScanErr("Could not extract transactions from this file. Try OCR → CSV for manual review.");
+          setScanErr("Could not find valid transactions in this file. Try 'OCR → CSV' for manual review.");
           setScanPhase(null);
-          setStep("form");
+          setStep("mode");
           return;
         }
         setImportBundle({ fileName: f.name, rows });
@@ -1184,6 +1210,7 @@ export default function App() {
   const mainBottomPad = "calc(96px + env(safe-area-inset-bottom, 0px))";
 
   return (
+    <>
     <div
       style={{
         background: T.bg,
@@ -1537,6 +1564,7 @@ export default function App() {
                   key={tx.id}
                   tx={tx}
                   onDelete={delTx}
+                  onSelect={setSelectedTx}
                   categories={categories}
                   formatMoney={formatMoney}
                   dateLocale={dateLocale || locale}
@@ -1945,8 +1973,8 @@ export default function App() {
                   ).map((id, i, order) => {
                     const labels = {
                       read: "Reading file from your device",
-                      ocr: "Extracting text (Tesseract.js OCR)",
-                      ai: "Sending image to AI (Claude)",
+                      ocr: "Extracting text from file",
+                      ai: "Sending to OpenAI for analysis",
                       parse: "Parsing total, category & lines",
                     };
                     const phase = order.includes(scanPhase) ? scanPhase : order[0];
@@ -3200,6 +3228,22 @@ export default function App() {
         })}
       </div>
     </div>
+
+    {/* Transaction detail overlay */}
+    {selectedTx && (
+      <TxDetail
+        tx={selectedTx}
+        categories={categories}
+        formatMoney={formatMoney}
+        dateLocale={dateLocale || locale}
+        onClose={() => setSelectedTx(null)}
+        onDelete={(id) => {
+          delTx(id);
+          setSelectedTx(null);
+        }}
+      />
+    )}
+    </>
   );
 }
 

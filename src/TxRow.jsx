@@ -2,7 +2,7 @@ import { Trash2, ImageIcon } from "lucide-react";
 import { T } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 
-export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
+export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLocale }) {
   const cat = getCat(categories, tx.category);
   return (
     <div
@@ -15,74 +15,106 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
         position: "relative",
       }}
     >
+      {/* clickable area: icon + title + amount */}
       <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelect?.(tx)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect?.(tx)}
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          background: cat.bg,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          fontSize: 20,
-          flexShrink: 0,
-          position: "relative",
+          gap: 12,
+          flex: 1,
+          minWidth: 0,
+          cursor: onSelect ? "pointer" : "default",
         }}
       >
-        {cat.e}
-        {tx.receiptUrl ? (
-          <span
-            title="Receipt attached"
-            style={{
-              position: "absolute",
-              bottom: 0,
-              right: 0,
-              width: 17,
-              height: 17,
-              borderRadius: 5,
-              background: T.surf,
-              border: `1px solid ${T.bdr}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
-            }}
-          >
-            <ImageIcon size={10} color={T.acc} strokeWidth={2.5} />
-          </span>
-        ) : null}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* category icon */}
         <div
           style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: T.txt,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: cat.bg,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 20,
+            flexShrink: 0,
+            position: "relative",
           }}
         >
-          {tx.notes || tx.category}
+          {cat.e}
+          {tx.receiptUrl ? (
+            <span
+              title="Receipt attached"
+              style={{
+                position: "absolute",
+                bottom: 0,
+                right: 0,
+                width: 17,
+                height: 17,
+                borderRadius: 5,
+                background: T.surf,
+                border: `1px solid ${T.bdr}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+              }}
+            >
+              <ImageIcon size={10} color={T.acc} strokeWidth={2.5} />
+            </span>
+          ) : null}
         </div>
-        <div style={{ fontSize: 12, color: T.sub, display: "flex", gap: 6, marginTop: 2 }}>
-          <span>{fDate(tx.date, dateLocale)}</span>
-          <span>·</span>
-          <span>{tx.payment}</span>
-          {tx.split && (
-            <>
-              <span>·</span>
-              <span style={{ color: T.acc }}>Split</span>
-            </>
-          )}
+
+        {/* title + meta */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: T.txt,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tx.notes || tx.category}
+          </div>
+          <div style={{ fontSize: 12, color: T.sub, display: "flex", gap: 6, marginTop: 2 }}>
+            <span>{fDate(tx.date, dateLocale)}</span>
+            <span>·</span>
+            <span>{tx.payment}</span>
+            {tx.split && (
+              <>
+                <span>·</span>
+                <span style={{ color: T.acc }}>Split</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* amount + category badge */}
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: T.txt }}>-{formatMoney(tx.amount)}</div>
+          <div
+            style={{
+              fontSize: 11,
+              color: cat.c,
+              background: cat.bg,
+              borderRadius: 6,
+              padding: "1px 7px",
+              marginTop: 2,
+            }}
+          >
+            {tx.category}
+          </div>
         </div>
       </div>
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: T.txt }}>-{formatMoney(tx.amount)}</div>
-        <div style={{ fontSize: 11, color: cat.c, background: cat.bg, borderRadius: 6, padding: "1px 7px", marginTop: 2 }}>
-          {tx.category}
-        </div>
-      </div>
+
+      {/* delete button — separate from the clickable row area */}
       <button
         type="button"
         onClick={() => onDelete(tx.id)}

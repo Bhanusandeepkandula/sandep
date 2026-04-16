@@ -74,31 +74,71 @@ async function extractImage(file, onProgress) {
 
 async function extractPdf(file, onProgress) {
   const buf = await file.arrayBuffer();
-  const pdfjsLib = await import("pdfjs-dist");
 
-  // Use unpkg which mirrors npm exactly — pdfjs-dist v5+ uses .mjs workers
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  let pdfjsLib;
+  try {
+    pdfjsLib = await import("pdfjs-dist");
+  } catch (e) {
+    throw new Error("Could not load PDF reader. Try uploading as CSV or XLSX instead.");
+  }
 
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  // Set up the worker — try module worker first, fall back to legacy .js worker
+  // Empty string = run without a worker thread (synchronous, works on all browsers incl. iOS)
+  try {
+    const ver = pdfjsLib.version || "";
+    const base = `https://unpkg.com/pdfjs-dist@${ver}/build/`;
+    // Prefer the .mjs worker; if that fails the error is caught below and we fall back
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}pdf.worker.min.mjs`;
+  } catch {
+    // ignore — worker will be set up per-document
+  }
+
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  } catch (workerErr) {
+    // Worker URL may have failed (CORS, CSP, iOS module worker restriction).
+    // Retry with the legacy .js worker.
+    try {
+      const ver = pdfjsLib.version || "";
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.min.js`;
+      pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+    } catch {
+      // Last resort: disable the worker entirely (runs synchronously on main thread)
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+        pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf), disableWorker: true }).promise;
+      } catch (finalErr) {
+        throw new Error(
+          "Could not read this PDF. It may be encrypted or damaged. Try exporting as CSV from your bank app instead."
+        );
+      }
+    }
+  }
+
   const totalPages = pdf.numPages;
   const pageTexts = [];
 
   for (let i = 1; i <= totalPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (pageText) pageTexts.push(pageText);
+    try {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (pageText) pageTexts.push(pageText);
+    } catch {
+      // skip pages that fail
+    }
     onProgress?.(i / totalPages);
   }
 
   if (pageTexts.length === 0) {
     throw new Error(
-      "No text found in this PDF. It may be a scanned image-only PDF — try converting to JPG and uploading the image instead."
+      "No text found in this PDF — it may be a scanned image-only PDF. Try exporting as CSV from your bank app, or use 'OCR → CSV' and upload a screenshot instead."
     );
   }
 
@@ -109,8 +149,14 @@ async function extractPdf(file, onProgress) {
 // ─── Spreadsheet → SheetJS ────────────────────────────────────────────────────
 
 async function extractSpreadsheet(file) {
+  let XLSX;
+  try {
+    XLSX = await import("xlsx");
+  } catch (e) {
+    throw new Error("Could not load spreadsheet reader. Try saving as CSV and uploading that instead.");
+  }
+
   const buf = await file.arrayBuffer();
-  const XLSX = await import("xlsx");
   const workbook = XLSX.read(new Uint8Array(buf), { type: "array" });
 
   const sheetName = workbook.SheetNames[0];

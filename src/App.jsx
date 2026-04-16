@@ -801,7 +801,11 @@ export default function App({ onReady }) {
       setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: enriched } : t)));
       setSelectedTx((st) => (st && st.id === txId ? { ...st, split: enriched } : st));
       if (!isMirrorCopy && merged?.split?.people?.length) {
-        await upsertSplitMirrors(db, uidRef.current, merged);
+        try {
+          await upsertSplitMirrors(db, uidRef.current, merged);
+        } catch (mirrorErr) {
+          console.error("Mirror sync failed (split still saved locally):", mirrorErr);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -1100,6 +1104,8 @@ export default function App({ onReady }) {
     setFErr("");
     setScanErr("");
     clearScanHints();
+    setSavingExpense(false);
+    setScanPhase(null);
     setStep("success");
     setTimeout(() => {
       setStep("mode");
@@ -1111,8 +1117,7 @@ export default function App({ onReady }) {
       setScanLineItems(null);
       setTab("home");
       dlg.toast(`Saved ${formatMoney(newTx.amount)} · ${newTx.category}`, { type: "success" });
-      
-    }, 2400);
+    }, 2000);
   }
 
   async function submitForm() {

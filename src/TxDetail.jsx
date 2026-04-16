@@ -18,17 +18,18 @@ export function TxDetail({
   splitContacts = [],
   onSaveSplit,
 }) {
-  const [splitOn, setSplitOn] = useState(false);
-  const [splitType, setSplitType] = useState("equal");
-  const [splitPpl, setSplitPpl] = useState([]);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
   const [imgOpen, setImgOpen] = useState(false);
+
+  const [splitEditing, setSplitEditing] = useState(false);
+  const [splitType, setSplitType] = useState("equal");
+  const [splitPpl, setSplitPpl] = useState([]);
   const [splitSaved, setSplitSaved] = useState(false);
   const splitTimerRef = useRef(null);
   const dlg = useDialog();
 
-  useEffect(() => { setEditing(false); setEditDraft(null); }, [tx?.id]);
+  useEffect(() => { setEditing(false); setEditDraft(null); setSplitEditing(false); }, [tx?.id]);
 
   function startEdit() {
     setEditDraft({
@@ -51,19 +52,6 @@ export function TxDetail({
   }
   function cancelEdit() { setEditing(false); setEditDraft(null); }
 
-  useEffect(() => {
-    if (!tx) return;
-    if (tx.split?.people?.length) {
-      setSplitOn(true);
-      setSplitType(tx.split.type === "custom" ? "custom" : "equal");
-      setSplitPpl(tx.split.people.map((p) => ({ n: p.n, a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0 })));
-    } else {
-      setSplitOn(false);
-      setSplitType("equal");
-      setSplitPpl([]);
-    }
-  }, [tx?.id]);
-
   if (!tx) return null;
 
   const cat = getCat(categories, tx.category);
@@ -72,6 +60,20 @@ export function TxDetail({
   const txAmt = Number(tx.amount) || 0;
   const canEditSplit = typeof onSaveSplit === "function" && !tx.syncedFromUid;
   const contacts = Array.isArray(splitContacts) ? splitContacts.map(normalizePerson).filter((p) => p.n) : [];
+
+  const hasSavedSplit = tx.split?.people?.length > 0;
+
+  function openSplitEditor() {
+    if (hasSavedSplit) {
+      setSplitPpl(tx.split.people.map((p) => ({ n: p.n, a: typeof p.a === "number" ? p.a : parseFloat(String(p.a)) || 0 })));
+      setSplitType(tx.split.type === "custom" ? "custom" : "equal");
+    } else {
+      setSplitPpl([]);
+      setSplitType("equal");
+    }
+    setSplitEditing(true);
+    setSplitSaved(false);
+  }
 
   function toggleSplitPerson(name) {
     setSplitPpl((prev) => {
@@ -89,9 +91,16 @@ export function TxDetail({
     const each = Math.round((txAmt / list.length) * 100) / 100;
     return list.map((p) => ({ ...p, a: each }));
   }
+
   function handleSaveSplit() {
     if (!canEditSplit) return;
-    if (!splitOn || !splitPpl.length) { onSaveSplit(tx.id, null); return; }
+    if (splitPpl.length === 0) {
+      onSaveSplit(tx.id, null);
+      setSplitEditing(false);
+      setSplitSaved(false);
+      dlg.toast("Split removed", { type: "info", duration: 2000 });
+      return;
+    }
     if (splitType === "custom") {
       const sum = splitPpl.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
       if (Math.abs(sum - txAmt) > 0.02) {
@@ -101,9 +110,21 @@ export function TxDetail({
     }
     onSaveSplit(tx.id, { type: splitType, people: splitPpl.map((p) => ({ n: p.n, a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0 })) });
     setSplitSaved(true);
+    setSplitEditing(false);
     if (splitTimerRef.current) clearTimeout(splitTimerRef.current);
     splitTimerRef.current = setTimeout(() => setSplitSaved(false), 2500);
+    dlg.toast("Split saved", { type: "success", duration: 2000 });
   }
+
+  function handleRemoveSplit() {
+    if (!canEditSplit) return;
+    onSaveSplit(tx.id, null);
+    setSplitEditing(false);
+    setSplitPpl([]);
+    setSplitSaved(false);
+    dlg.toast("Split removed", { type: "info", duration: 2000 });
+  }
+
   useEffect(() => () => { if (splitTimerRef.current) clearTimeout(splitTimerRef.current); }, []);
   function handleDelete() { onDelete(tx.id); onClose(); }
 
@@ -207,29 +228,154 @@ export function TxDetail({
                     </div>
                   </div>
                 )}
-                {tx.split?.people?.length > 0 && (() => {
-                  const pplSum = tx.split.people.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
-                  const yourShare = txAmt - pplSum;
-                  return (
-                    <div style={{ padding: "10px 0" }}>
-                      <div style={{ fontSize: 13, color: T.sub, marginBottom: 8 }}>Split</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><Users size={11} color={T.acc} /> You</span>
-                          <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(yourShare)}</span>
-                        </div>
-                        {tx.split.people.map((p, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><Users size={11} color={T.sub} /> {p.n}</span>
-                            <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(p.a)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
             </div>
+
+            {/* Split Summary (read-only, when split exists and NOT editing) */}
+            {hasSavedSplit && !splitEditing && (() => {
+              const pplSum = tx.split.people.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
+              const yourShare = txAmt - pplSum;
+              return (
+                <div style={{ padding: "0 16px" }}>
+                  <div style={{ ...sectionCard, background: `${T.acc}08`, borderColor: `${T.acc}33` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Users size={14} color={T.acc} />
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>Split</span>
+                      </div>
+                      {canEditSplit && (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button type="button" onClick={openSplitEditor}
+                            style={{ background: T.adim, border: `1px solid ${T.acc}44`, color: T.acc, cursor: "pointer", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Pencil size={10} /> Edit
+                          </button>
+                          <button type="button" onClick={handleRemoveSplit}
+                            style={{ background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, cursor: "pointer", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Trash2 size={10} /> Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.acc} /> You</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: T.acc }}>{formatMoney(yourShare)}</span>
+                      </div>
+                      {tx.split.people.map((p, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.sub} /> {p.n}</span>
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(p.a)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Split Editor (only when editing or no saved split + user initiated) */}
+            {canEditSplit && (splitEditing || (!hasSavedSplit && !splitSaved)) && (
+              <div style={{ padding: "0 16px" }}>
+                <div style={{ ...sectionCard, background: splitEditing ? `${T.acc}08` : T.card, borderColor: splitEditing ? `${T.acc}33` : T.bdr }}>
+                  {!splitEditing && !hasSavedSplit ? (
+                    <button type="button" onClick={openSplitEditor}
+                      style={{
+                        width: "100%", display: "flex", alignItems: "center", gap: 10,
+                        background: "none", border: "none", cursor: "pointer", padding: 0, color: "inherit",
+                      }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 10, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Users size={16} color={T.acc} />
+                      </div>
+                      <div style={{ flex: 1, textAlign: "left" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>Split Expense</div>
+                        <div style={{ fontSize: 11, color: T.sub }}>Tap to split cost with people</div>
+                      </div>
+                    </button>
+                  ) : splitEditing ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: 10, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <Users size={16} color={T.acc} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>Split Expense</div>
+                            <div style={{ fontSize: 11, color: T.sub }}>Select people and amounts</div>
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => setSplitEditing(false)}
+                          style={{ background: T.card2, border: "none", color: T.sub, cursor: "pointer", padding: 6, borderRadius: 8 }}>
+                          <X size={16} />
+                        </button>
+                      </div>
+
+                      {contacts.length === 0 ? (
+                        <div style={{ fontSize: 12, color: T.warn, lineHeight: 1.4, padding: "8px 10px", background: T.wdim, borderRadius: 8 }}>
+                          Add people under <strong style={{ color: T.txt }}>Profile &rarr; Split Contacts</strong> first.
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                            {["equal", "custom"].map((t) => (
+                              <button key={t} type="button" onClick={() => { setSplitType(t); if (t === "equal") setSplitPpl((p) => applyEqual(p)); }}
+                                style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: splitType === t ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: splitType === t ? T.adim : "transparent", color: splitType === t ? T.acc : T.sub, fontSize: 12, fontWeight: splitType === t ? 700 : 500, cursor: "pointer" }}>
+                                {t === "equal" ? "Equal split" : "Custom amounts"}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                            {contacts.map((p) => {
+                              const sel = splitPpl.find((sp) => sp.n === p.n);
+                              return (
+                                <button key={personStableKey(p)} type="button" onClick={() => toggleSplitPerson(p.n)}
+                                  style={{ padding: "6px 12px", borderRadius: 10, border: sel ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: sel ? T.adim : "transparent", color: sel ? T.acc : T.sub, fontSize: 12, fontWeight: sel ? 600 : 400, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                                  <Users size={12} /> {p.n}
+                                  {sel && splitType === "equal" && txAmt > 0 && <span style={{ fontWeight: 700, color: T.acc }}>{formatMoney(sel.a)}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {splitType === "custom" && splitPpl.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              {splitPpl.map((p, i) => (
+                                <div key={p.n} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 12, color: T.sub, width: 80, display: "flex", alignItems: "center", gap: 4 }}><Users size={11} /> {p.n}</span>
+                                  <input type="number" inputMode="decimal" value={p.a} onChange={(e) => setSplitPpl((prev) => prev.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))} style={{ ...inp, flex: 1, padding: "8px 10px", fontSize: 14 }} />
+                                </div>
+                              ))}
+                              <div style={{ fontSize: 11, color: T.mut, marginTop: 4 }}>Total must equal {formatMoney(txAmt)}</div>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button type="button" onClick={handleSaveSplit} disabled={splitPpl.length === 0}
+                              style={{
+                                flex: 2, padding: 12, borderRadius: 10, border: "none",
+                                background: splitPpl.length === 0 ? T.mut : T.acc,
+                                color: splitPpl.length === 0 ? T.sub : T.btnTxt,
+                                fontWeight: 800, fontSize: 14,
+                                cursor: splitPpl.length === 0 ? "not-allowed" : "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                              }}>
+                              <Check size={16} /> Save Split
+                            </button>
+                            <button type="button" onClick={() => setSplitEditing(false)}
+                              style={{
+                                flex: 1, padding: 12, borderRadius: 10,
+                                border: `1px solid ${T.bdr}`, background: "transparent",
+                                color: T.sub, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                              }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            )}
 
             {/* Receipt Image */}
             {tx.receiptUrl && (
@@ -275,113 +421,6 @@ export function TxDetail({
               </div>
             )}
 
-            {/* Split Section */}
-            {canEditSplit && (
-              <div style={{ padding: "0 16px" }}>
-                <div style={{ ...sectionCard, background: splitOn ? `${T.acc}08` : T.card, borderColor: splitOn ? `${T.acc}33` : T.bdr }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: splitOn ? 12 : 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 10, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <Users size={16} color={T.acc} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>Split Expense</div>
-                        <div style={{ fontSize: 11, color: T.sub }}>Share cost with people</div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSplitOn((prev) => {
-                          if (prev) { setSplitPpl([]); if (canEditSplit) onSaveSplit(tx.id, null); return false; }
-                          if (tx.split?.people?.length) { setSplitPpl(tx.split.people.map((p) => ({ n: p.n, a: typeof p.a === "number" ? p.a : parseFloat(String(p.a)) || 0 }))); setSplitType(tx.split.type === "custom" ? "custom" : "equal"); }
-                          else { setSplitPpl([]); setSplitType("equal"); }
-                          return true;
-                        });
-                      }}
-                      style={{ width: 48, height: 28, borderRadius: 999, border: "none", background: splitOn ? T.acc : T.mut, cursor: "pointer", position: "relative", flexShrink: 0, transition: "background .2s" }}
-                    >
-                      <span style={{ position: "absolute", top: 3, width: 22, height: 22, borderRadius: "50%", background: "#fff", left: splitOn ? 23 : 3, transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
-                    </button>
-                  </div>
-
-                  {splitOn && (
-                    <>
-                      {contacts.length === 0 ? (
-                        <div style={{ fontSize: 12, color: T.warn, lineHeight: 1.4, padding: "8px 10px", background: T.wdim, borderRadius: 8 }}>
-                          Add people under <strong style={{ color: T.txt }}>Profile &rarr; Split Contacts</strong> first.
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-                            {["equal", "custom"].map((t) => (
-                              <button key={t} type="button" onClick={() => { setSplitType(t); if (t === "equal") setSplitPpl((p) => applyEqual(p)); }}
-                                style={{ flex: 1, padding: "8px 10px", borderRadius: 10, border: splitType === t ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: splitType === t ? T.adim : "transparent", color: splitType === t ? T.acc : T.sub, fontSize: 12, fontWeight: splitType === t ? 700 : 500, cursor: "pointer" }}>
-                                {t === "equal" ? "Equal split" : "Custom amounts"}
-                              </button>
-                            ))}
-                          </div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                            {contacts.map((p) => {
-                              const sel = splitPpl.find((sp) => sp.n === p.n);
-                              return (
-                                <button key={personStableKey(p)} type="button" onClick={() => toggleSplitPerson(p.n)}
-                                  style={{ padding: "6px 12px", borderRadius: 10, border: sel ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: sel ? T.adim : "transparent", color: sel ? T.acc : T.sub, fontSize: 12, fontWeight: sel ? 600 : 400, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
-                                  <Users size={12} /> {p.n}
-                                  {sel && splitType === "equal" && txAmt > 0 && <span style={{ fontWeight: 700, color: T.acc }}>{formatMoney(sel.a)}</span>}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {splitType === "custom" && splitPpl.length > 0 && (
-                            <div style={{ marginBottom: 10 }}>
-                              {splitPpl.map((p, i) => (
-                                <div key={p.n} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                                  <span style={{ fontSize: 12, color: T.sub, width: 80, display: "flex", alignItems: "center", gap: 4 }}><Users size={11} /> {p.n}</span>
-                                  <input type="number" inputMode="decimal" value={p.a} onChange={(e) => setSplitPpl((prev) => prev.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))} style={{ ...inp, flex: 1, padding: "8px 10px", fontSize: 14 }} />
-                                </div>
-                              ))}
-                              <div style={{ fontSize: 11, color: T.mut, marginTop: 4 }}>Total must equal {formatMoney(txAmt)}</div>
-                            </div>
-                          )}
-                          <button type="button" onClick={handleSaveSplit} disabled={splitPpl.length === 0 || splitSaved}
-                            style={{
-                              width: "100%", padding: 12, borderRadius: 10, border: "none",
-                              background: splitSaved ? T.adim : splitPpl.length === 0 ? T.mut : T.acc,
-                              color: splitSaved ? T.acc : splitPpl.length === 0 ? T.sub : T.btnTxt,
-                              fontWeight: 800, fontSize: 14,
-                              cursor: splitPpl.length === 0 || splitSaved ? "not-allowed" : "pointer",
-                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                              transition: "all .25s ease",
-                            }}>
-                            {splitSaved ? <><CheckCircle2 size={16} /> Saved!</> : <><Check size={16} /> Save Split</>}
-                          </button>
-
-                          {splitSaved && splitPpl.length > 0 && (
-                            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: T.adim, border: `1px solid ${T.acc}33` }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: T.acc, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Split Summary</div>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                                  <span style={{ color: T.sub }}>You</span>
-                                  <span style={{ fontWeight: 700 }}>{formatMoney(txAmt - splitPpl.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0))}</span>
-                                </div>
-                                {splitPpl.map((p, i) => (
-                                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                                    <span style={{ color: T.sub }}>{p.n}</span>
-                                    <span style={{ fontWeight: 700 }}>{formatMoney(parseFloat(String(p.a)) || 0)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Delete */}
             <div style={{ padding: "6px 16px 36px" }}>
               <button type="button" onClick={handleDelete}
@@ -396,7 +435,7 @@ export function TxDetail({
 
     {/* Full-screen receipt viewer */}
     {imgOpen && tx.receiptUrl && (
-      <div onClick={() => setImgOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+      <div onClick={() => setImgOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", animation: "fade-in .2s ease" }}>
         <button type="button" onClick={() => setImgOpen(false)} style={{ position: "absolute", top: 16, right: 16, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 999, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <X size={20} color="#fff" />
         </button>

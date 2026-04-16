@@ -23,7 +23,8 @@ export function enrichSplitPeopleFromContacts(split, contactsArr) {
   return {
     ...split,
     people: split.people.map((p) => {
-      const c = contacts.find((x) => x.n === p.n);
+      const pName = String(p.n || "").trim().toLowerCase();
+      const c = contacts.find((x) => x.n.toLowerCase() === pName);
       const n = String(p.n || "").trim();
       const a = typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0;
       const out = { n, a };

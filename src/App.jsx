@@ -850,7 +850,7 @@ export default function App({ onReady }) {
       setShowSplitScan(false);
       return;
     }
-    const entry = normalizePerson({ n: parsed.n, e: parsed.e || undefined, u: parsed.u || undefined });
+    const entry = normalizePerson({ n: parsed.n, e: parsed.e || undefined, u: parsed.u || undefined, fuid: parsed.fuid || undefined });
     const list = people.map(normalizePerson);
     if (list.some((x) => sameSplitPerson(x, entry))) {
       dlg.toast(`${entry.n} is already in your split contacts.`, { type: "warn" });
@@ -5207,6 +5207,7 @@ export default function App({ onReady }) {
                     email: firebaseUser.email,
                     uuid: profileTagUuid || "",
                     name: profileName.trim(),
+                    fuid: firebaseUser?.uid || "",
                   })}
                   size={200}
                   level="M"
@@ -5265,6 +5266,7 @@ export default function App({ onReady }) {
                   email: firebaseUser.email,
                   uuid: profileTagUuid || "",
                   name: profileName.trim(),
+                  fuid: firebaseUser?.uid || "",
                 });
                 void navigator.clipboard.writeText(t).then(() => {
                   setProfileQrCopied(true);

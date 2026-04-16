@@ -9,7 +9,10 @@ const OPENAI_KEY = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
 const HEADER_LINE = "date,amount,category,payment,notes,tags";
 
-const SYSTEM_PROMPT = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
+/** Long bank dumps: plain CSV only (JSON line arrays get huge). */
+const OCR_JSON_MAX_CHARS = 24_000;
+
+const SYSTEM_PROMPT_CSV_PLAIN = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
 
 CRITICAL — first line of your reply MUST be this exact header (copy it verbatim, character for character):
 ${HEADER_LINE}
@@ -33,6 +36,27 @@ Amount rules — IMPORTANT:
 Output rules:
 - Return ONLY the CSV text. No markdown, no explanation, no code fences, no leading commentary.
 - Use double-quotes around any field that contains a comma.`;
+
+const SYSTEM_PROMPT_OCR_JSON = `You turn noisy OCR text (typos, broken lines, mixed columns) from receipts, bills, and bank snippets into valid expense data.
+
+YOU MUST OUTPUT ONLY VALID JSON. No markdown fences, no commentary before or after.
+Shape:
+{"csv_lines":["${HEADER_LINE}","<data row 1>", ...], "follow_up_questions":["<question>", ...]}
+
+csv_lines rules:
+- Index 0 must be exactly: ${HEADER_LINE}
+- Each further element is ONE complete CSV data row (same columns). Use double-quotes inside a row when a field contains commas.
+- Work hard on messy OCR: fix common confusions (O/0, l/1, S/5), merge split lines when obvious, infer merchant names from fragments.
+- date: YYYY-MM-DD. If only day+month appear, use the current year from the user message. If the bill date is completely missing, use today's date AND add a follow_up_question asking the user to confirm the real date.
+- amount: positive number only, no currency symbols inside the number. NEVER guess a total you cannot support from the text; if no plausible total exists, output csv_lines with HEADER ONLY (no data rows) and ask in follow_up_questions for the grand total / missing amounts.
+- category and payment: MUST match the user's lists EXACTLY (same spelling and case). Pick the closest semantic match.
+- Single paper receipt: EXACTLY ONE data row = grand total (not every line item). Bank list: one row per purchase/debit (money OUT); skip salary, deposits, credits.
+- If the snippet is clearly not financial, output header only and one follow_up_question asking for bill or transaction text.
+
+follow_up_questions (required array, can be empty):
+- 0–6 short, specific questions in plain language ONLY when data is missing, ambiguous, or should be verified (e.g. "The total is hard to read — what is the amount on the receipt?", "Which currency is this?").
+- Use [] when you are confident and all required fields are grounded in the OCR text.
+- Do not duplicate questions.`;
 
 /**
  * Force every category/payment cell to exactly match a catalog entry.
@@ -101,19 +125,96 @@ function parseRow(line) {
   return cells;
 }
 
-/**
- * Convert raw OCR text to expense CSV using OpenAI.
- * @param {string} ocrText
- * @param {{ categories?: string[]; payments?: string[] }} catalog
- * @returns {Promise<string>} CSV string including header
- */
-export async function convertOcrToCsv(ocrText, { categories = [], payments = [] } = {}) {
+function requireOpenAiKey() {
   if (!OPENAI_KEY) {
     throw new Error(
       "OpenAI key not configured. Add VITE_OPENAI_API_KEY to your .env.local (dev) or GitHub repository secrets (production), then rebuild."
     );
   }
+}
 
+/** @param {unknown[]} items */
+function dedupeQuestions(items) {
+  const out = [];
+  const seen = new Set();
+  for (const x of items) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Pull JSON from model reply (may be wrapped in markdown).
+ * @param {string} raw
+ */
+function parseModelJson(raw) {
+  const t = String(raw || "")
+    .trim()
+    .replace(/^```json?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    const m = t.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+  }
+  throw new Error("Could not read the AI response. Try again.");
+}
+
+/**
+ * @param {string} raw
+ * @param {string[]} categories
+ * @param {string[]} payments
+ * @returns {string | null}
+ */
+function tryRecoverPlainCsvFromRaw(raw, categories, payments) {
+  const csv = String(raw || "")
+    .replace(/^```(?:csv)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  if (!csv || !/^date\s*,\s*amount/i.test(csv.split("\n")[0] || "")) return null;
+  const withHeader = ensureExpenseCsvHeaderRow(csv);
+  return fixCatalogColumns(withHeader, categories, payments);
+}
+
+/**
+ * @param {unknown} parsed
+ * @returns {string[]}
+ */
+function followUpsFromParsed(parsed) {
+  const k = parsed && typeof parsed === "object" ? /** @type {Record<string, unknown>} */ (parsed).follow_up_questions : null;
+  if (!Array.isArray(k)) return [];
+  return k.map((x) => String(x).trim()).filter(Boolean).slice(0, 8);
+}
+
+/**
+ * @param {unknown} parsed
+ * @returns {string}
+ */
+function csvFromParsedLines(parsed) {
+  const p = parsed && typeof parsed === "object" ? /** @type {Record<string, unknown>} */ (parsed) : {};
+  if (Array.isArray(p.csv_lines) && p.csv_lines.length > 0) {
+    return p.csv_lines.map((x) => String(x).trim()).filter(Boolean).join("\n");
+  }
+  if (typeof p.csv === "string" && p.csv.trim()) {
+    return p.csv.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  }
+  return "";
+}
+
+/**
+ * Plain CSV model (best for very long statement text).
+ * @param {string} ocrText
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ */
+async function convertOcrToCsvLegacy(ocrText, { categories = [], payments = [] } = {}) {
+  requireOpenAiKey();
   const catList = categories.length ? categories.join(", ") : "(none)";
   const payList = payments.length ? payments.join(", ") : "(none)";
 
@@ -136,9 +237,9 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
     body: JSON.stringify({
       model: "gpt-4o-mini",
       temperature: 0,
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: SYSTEM_PROMPT_CSV_PLAIN },
         { role: "user", content: userMsg },
       ],
     }),
@@ -156,12 +257,125 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
   const raw = String(data?.choices?.[0]?.message?.content || "").trim();
   if (!raw) throw new Error("OpenAI returned an empty response. Try again.");
 
-  // Strip markdown code fences if model wraps output
   const csv = raw.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-
   const withHeader = ensureExpenseCsvHeaderRow(csv);
-  // Post-process: guarantee category/payment exactly match catalog entries
   return fixCatalogColumns(withHeader, categories, payments);
+}
+
+/**
+ * JSON csv_lines + follow_up_questions (for manual OCR → CSV and shorter statement text).
+ * @param {string} ocrText
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ */
+async function convertOcrToCsvJson(ocrText, { categories = [], payments = [] } = {}) {
+  requireOpenAiKey();
+  const catList = categories.length ? categories.join(", ") : "(none)";
+  const payList = payments.length ? payments.join(", ") : "(none)";
+  const today = new Date().toISOString().split("T")[0];
+
+  const userMsg = [
+    `Categories (exact match, same spelling): ${catList}`,
+    `Payments (exact match, same spelling): ${payList}`,
+    `Today's date: ${today}`,
+    ``,
+    `OCR / pasted text (may be messy):`,
+    ocrText.trim(),
+  ].join("\n");
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT_OCR_JSON },
+        { role: "user", content: userMsg },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `OpenAI error (${res.status})`;
+    if (res.status === 401) throw new Error("Invalid OpenAI API key. Check VITE_OPENAI_API_KEY.");
+    if (res.status === 429) throw new Error("OpenAI rate limit hit. Wait a moment and try again.");
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  const raw = String(data?.choices?.[0]?.message?.content || "").trim();
+  if (!raw) throw new Error("OpenAI returned an empty response. Try again.");
+
+  let parsed;
+  try {
+    parsed = parseModelJson(raw);
+  } catch {
+    const recovered = tryRecoverPlainCsvFromRaw(raw, categories, payments);
+    if (recovered) {
+      return {
+        csv: recovered,
+        followUpQuestions: [
+          "The model did not return valid JSON; this CSV was read from the reply. Please verify amounts, dates, and categories before importing.",
+        ],
+      };
+    }
+    throw new Error("Could not parse the AI response. Try again.");
+  }
+
+  let inner = csvFromParsedLines(parsed);
+  const followUpQuestions = dedupeQuestions(followUpsFromParsed(parsed));
+
+  if (!inner.trim()) {
+    const recovered = tryRecoverPlainCsvFromRaw(raw, categories, payments);
+    if (recovered) {
+      return {
+        csv: recovered,
+        followUpQuestions: dedupeQuestions([
+          ...followUpQuestions,
+          "Structured CSV lines were empty; recovered plain CSV from the reply. Please verify every row.",
+        ]),
+      };
+    }
+    throw new Error("AI returned no CSV rows. Add clearer totals or dates to the text and try again.");
+  }
+
+  const withHeader = ensureExpenseCsvHeaderRow(inner);
+  const csv = fixCatalogColumns(withHeader, categories, payments);
+  return { csv, followUpQuestions };
+}
+
+/**
+ * OCR text → CSV plus optional follow-up questions for the user.
+ * @param {string} ocrText
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ * @returns {Promise<{ csv: string; followUpQuestions: string[] }>}
+ */
+export async function convertOcrToCsvStructured(ocrText, { categories = [], payments = [] } = {}) {
+  const trimmed = ocrText.trim();
+  if (!trimmed) {
+    return { csv: `${HEADER_LINE}\n`, followUpQuestions: [] };
+  }
+  if (trimmed.length > OCR_JSON_MAX_CHARS) {
+    const csv = await convertOcrToCsvLegacy(trimmed, { categories, payments });
+    return { csv, followUpQuestions: [] };
+  }
+  return convertOcrToCsvJson(trimmed, { categories, payments });
+}
+
+/**
+ * Convert raw OCR text to expense CSV using OpenAI (plain CSV path for long text).
+ * @param {string} ocrText
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ * @returns {Promise<string>} CSV string including header
+ */
+export async function convertOcrToCsv(ocrText, { categories = [], payments = [] } = {}) {
+  const { csv } = await convertOcrToCsvStructured(ocrText, { categories, payments });
+  return csv;
 }
 
 /** True when CSV parses to at least one valid expense row. */
@@ -170,25 +384,6 @@ function assessExpenseCsvQuality(csvString, categories, payments) {
   const { rows, fatal } = parseExpenseCsv(withHeader, { categories, payments });
   if (fatal) return false;
   return rows.some((r) => r.ok);
-}
-
-/**
- * Pull JSON from vision model (may be wrapped in markdown).
- * @param {string} raw
- */
-function parseVisionIntentJson(raw) {
-  const t = String(raw || "")
-    .trim()
-    .replace(/^```json?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
-    .trim();
-  try {
-    return JSON.parse(t);
-  } catch {
-    const m = t.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
-  }
-  throw new Error("Could not read the AI response. Try again.");
 }
 
 const VISION_SYSTEM_PROMPT = `You analyze photos and screenshots for a personal expense app.
@@ -202,8 +397,12 @@ Return ONLY valid JSON: {"intent":"unsupported","message":"Short reason for the 
 Do not include csv.
 
 STEP 3 — If "supported":
-Return ONLY valid JSON: {"intent":"supported","csv_lines":["date,amount,category,payment,notes,tags","first data row",...]}
-Use the array "csv_lines" where index 0 is the header line (exactly matching the header below) and each following element is one CSV data row. This avoids escaping issues.
+Return ONLY valid JSON:
+{"intent":"supported","csv_lines":["date,amount,category,payment,notes,tags","first data row",...],"follow_up_questions":[]}
+
+Use "csv_lines" where index 0 is the header line (exactly matching the header below) and each following element is one CSV data row.
+
+Include "follow_up_questions": array of 0–6 short questions for the user ONLY when something is unclear (unreadable total, ambiguous date, currency, cropped screen). Use [] when confident. Never invent amounts — ask instead.
 
 CSV rules (same as text OCR):
 - First line MUST be exactly: ${HEADER_LINE}
@@ -218,13 +417,10 @@ If the image is blurry but still financial, do your best; if truly unreadable, u
  * Image → CSV via vision (no local OCR). Validates intent and CSV quality.
  * @param {string} imageDataUrl data:image/...
  * @param {{ categories?: string[]; payments?: string[] }} catalog
+ * @returns {Promise<{ csv: string; followUpQuestions: string[] }>}
  */
 export async function convertBillImageToCsvVision(imageDataUrl, { categories = [], payments = [] } = {}) {
-  if (!OPENAI_KEY) {
-    throw new Error(
-      "OpenAI key not configured. Add VITE_OPENAI_API_KEY to your .env.local (dev) or GitHub repository secrets (production), then rebuild."
-    );
-  }
+  requireOpenAiKey();
 
   const catList = categories.length ? categories.join(", ") : "(none)";
   const payList = payments.length ? payments.join(", ") : "(none)";
@@ -266,7 +462,7 @@ export async function convertBillImageToCsvVision(imageDataUrl, { categories = [
 
   let parsed;
   try {
-    parsed = parseVisionIntentJson(raw);
+    parsed = parseModelJson(raw);
   } catch {
     throw new Error("Could not parse the AI response. Try again with a clearer image.");
   }
@@ -276,12 +472,8 @@ export async function convertBillImageToCsvVision(imageDataUrl, { categories = [
     throw new Error(m);
   }
 
-  let csv = "";
-  if (Array.isArray(parsed.csv_lines) && parsed.csv_lines.length > 0) {
-    csv = parsed.csv_lines.map((/** @type {unknown} */ x) => String(x).trim()).filter(Boolean).join("\n");
-  } else if (typeof parsed.csv === "string" && parsed.csv.trim()) {
-    csv = parsed.csv.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-  }
+  const csv = csvFromParsedLines(parsed);
+  const followUpQuestions = dedupeQuestions(followUpsFromParsed(parsed));
 
   if (parsed.intent !== "supported" || !csv.trim()) {
     throw new Error("Could not extract expenses from this image. Try a receipt or bank transaction screenshot.");
@@ -295,32 +487,44 @@ export async function convertBillImageToCsvVision(imageDataUrl, { categories = [
     );
   }
 
-  return fixed;
+  return { csv: fixed, followUpQuestions };
 }
 
 /**
- * 1) Local OCR text → OpenAI → CSV. If quality is poor and an image is available, 2) send the image to vision.
+ * 1) Local OCR text → OpenAI → CSV (+ follow-ups). If quality is poor and an image is available, 2) send the image to vision.
  * @param {string} ocrText from Tesseract / paste / PDF text
  * @param {string | null} imageDataUrl optional screenshot/photo data URL for fallback
  * @param {{ categories?: string[]; payments?: string[] }} catalog
+ * @returns {Promise<{ csv: string; followUpQuestions: string[] }>}
  */
 export async function convertBillToCsvRobust(ocrText, imageDataUrl, { categories = [], payments = [] } = {}) {
   const trimmed = ocrText.trim();
   let textCsv = null;
+  /** @type {string[]} */
+  let followAccum = [];
 
   if (trimmed.length) {
-    textCsv = await convertOcrToCsv(trimmed, { categories, payments });
+    const structured = await convertOcrToCsvStructured(trimmed, { categories, payments });
+    textCsv = structured.csv;
+    followAccum = structured.followUpQuestions.slice();
     if (assessExpenseCsvQuality(textCsv, categories, payments)) {
-      return textCsv;
+      return { csv: textCsv, followUpQuestions: dedupeQuestions(followAccum) };
     }
   }
 
   if (imageDataUrl && String(imageDataUrl).startsWith("data:image/")) {
-    return await convertBillImageToCsvVision(imageDataUrl, { categories, payments });
+    const { csv, followUpQuestions } = await convertBillImageToCsvVision(imageDataUrl, { categories, payments });
+    return { csv, followUpQuestions: dedupeQuestions([...followAccum, ...followUpQuestions]) };
   }
 
   if (textCsv) {
-    return textCsv;
+    const weak = [...followAccum];
+    if (!assessExpenseCsvQuality(textCsv, categories, payments)) {
+      weak.push(
+        "No row passed validation yet. Each line needs: amount greater than zero, date as YYYY-MM-DD, and category and payment that exactly match your app lists. Add missing numbers or dates to the text box, then tap Convert again, or upload a clearer photo for AI vision."
+      );
+    }
+    return { csv: textCsv, followUpQuestions: dedupeQuestions(weak) };
   }
 
   throw new Error("Paste or upload bill text, or upload an image so we can read it with AI.");

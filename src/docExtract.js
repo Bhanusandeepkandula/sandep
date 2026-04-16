@@ -1,7 +1,7 @@
 /**
  * Unified document text extractor.
  * Routes by file type:
- *   - images (jpg/png/webp/gif/bmp/tiff) → Tesseract OCR (existing)
+ *   - images (jpg/png/webp/gif/bmp/tiff) → Tesseract OCR ([tesseract-ocr/tesseract](https://github.com/tesseract-ocr/tesseract) engine via `tesseract.js` in the browser)
  *   - PDF                                 → PDF.js text extraction
  *   - XLSX / XLS / ODS / CSV             → SheetJS → CSV text
  *
@@ -62,7 +62,7 @@ function isSupportedType(mt, name) {
   return isPdf(mt, name) || isSpreadsheet(mt, name) || isImage(mt, name);
 }
 
-// ─── Image → Tesseract ────────────────────────────────────────────────────────
+// ─── Image → Tesseract (LSTM OCR) → text for OpenAI / CSV ─────────────────────
 
 async function extractImage(file, onProgress) {
   const { extractReceiptTextWithOcr } = await import("./receiptOcr.js");

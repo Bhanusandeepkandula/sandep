@@ -1,7 +1,11 @@
 /**
- * In-browser OCR using Tesseract (same engine as desktop tools such as
- * [Textemage](https://github.com/Akascape/TEXTEMAGE); that project is Python+GUI,
- * this app uses the official `tesseract.js` package for the web).
+ * In-browser OCR using the same engine family as
+ * [Tesseract Open Source OCR](https://github.com/tesseract-ocr/tesseract) (LSTM line recognition).
+ * This app uses [`tesseract.js`](https://github.com/naptha/tesseract.js) (WASM) so extraction runs
+ * entirely in the browser — no native `tesseract` binary required.
+ *
+ * Extracted text is intended to be passed to OpenAI (see `ocrConvert.js` / `docExtract.js`) for
+ * structured expense CSV.
  */
 
 /**
@@ -20,22 +24,53 @@ export function canRunBrowserOcr(mediaType, isStatement) {
 }
 
 /**
+ * Normalize OCR text: keep line breaks (helps OpenAI see totals / columns), trim noise.
+ * @param {string} raw
+ */
+function normalizeOcrText(raw) {
+  return String(raw || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[\t\f\v]+/g, " ").replace(/ +/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .replace(/\n{5,}/g, "\n\n\n\n")
+    .trim();
+}
+
+/**
  * @param {string} dataUrl full data URL (e.g. from FileReader.readAsDataURL)
  * @param {(progress01: number) => void} [onProgress]
- * @returns {Promise<string>} trimmed plain text (capped for API context)
+ * @returns {Promise<string>} plain text (capped for API context)
  */
 export async function extractReceiptTextWithOcr(dataUrl, onProgress) {
-  const { recognize, setLogging } = await import("tesseract.js");
+  const { createWorker, setLogging, PSM, OEM } = await import("tesseract.js");
   setLogging(false);
-  const { data } = await recognize(dataUrl, "eng", {
+
+  const worker = await createWorker("eng", OEM.LSTM_ONLY, {
     logger: (m) => {
       if (m.status === "recognizing text" && typeof m.progress === "number") {
         onProgress?.(Math.min(1, Math.max(0, m.progress)));
       }
     },
   });
-  const t = String(data?.text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return t.length > 14000 ? t.slice(0, 14000) : t;
+
+  try {
+    // Aligns with CLI `tesseract ... --psm 3` style: full auto page segmentation (receipts + screenshots).
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.AUTO,
+      preserve_interword_spaces: "1",
+    });
+
+    const { data } = await worker.recognize(dataUrl);
+    const t = normalizeOcrText(data?.text || "");
+    return t.length > 14_000 ? t.slice(0, 14_000) : t;
+  } finally {
+    try {
+      await worker.terminate();
+    } catch {
+      /* ignore */
+    }
+  }
 }

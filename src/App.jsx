@@ -70,6 +70,7 @@ import {
   buildImportRowsFromVisionTransactions,
 } from "./scanAi.js";
 import { convertOcrToCsv, convertBillToCsvRobust } from "./ocrConvert.js";
+import { buildImageToExpenseCsvPrompt } from "./ocrExternalLlmPrompt.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 import { extractTextFromFile, fileToDataUrl } from "./docExtract.js";
@@ -92,6 +93,63 @@ import {
 
 /** UI + modal value for overall monthly cap (stored as `monthlyBudgetTotal` on settings/app, not under `budgets`). */
 const MONTH_TOTAL_BUDGET_KEY = "__month_total__";
+
+/**
+ * Collapsible copy-paste prompt for vision LLMs (ChatGPT, Claude, Gemini, etc.) → expense CSV.
+ * @param {{ prompt: string; onCopy: () => void | Promise<void>; disabled?: boolean; blurb: string }} p
+ */
+function ExternalLlmCsvPromptPanel({ prompt, onCopy, disabled, blurb }) {
+  return (
+    <details style={{ ...card2, marginTop: 14, marginBottom: 12, fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+      <summary style={{ cursor: "pointer", fontWeight: 600, color: T.txt, userSelect: "none" }}>
+        Universal prompt: image → expense CSV (any LLM)
+      </summary>
+      <div style={{ marginTop: 12 }}>
+        <p style={{ margin: "0 0 10px", color: T.sub }}>{blurb}</p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void onCopy()}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 14px",
+              borderRadius: T.r,
+              border: "none",
+              background: disabled ? T.mut : T.acc,
+              color: "#000",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: disabled ? "not-allowed" : "pointer",
+            }}
+          >
+            <Copy size={16} aria-hidden />
+            Copy prompt
+          </button>
+          <span style={{ fontSize: 11, color: T.mut }}>Includes your app’s category and payment names.</span>
+        </div>
+        <textarea
+          readOnly
+          value={prompt}
+          rows={14}
+          aria-label="Prompt to copy for external AI tools"
+          style={{
+            ...inp,
+            width: "100%",
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 10,
+            lineHeight: 1.35,
+            resize: "vertical",
+            minHeight: 200,
+            maxHeight: 360,
+          }}
+        />
+      </div>
+    </details>
+  );
+}
 
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 
@@ -153,6 +211,8 @@ export default function App() {
   const [ocrCsvBusy, setOcrCsvBusy] = useState(false);
   const [ocrCsvTessBusy, setOcrCsvTessBusy] = useState(false);
   const [ocrCsvErr, setOcrCsvErr] = useState("");
+  /** Short prompts from the model when OCR/image data was incomplete — user should answer in the text box and convert again. */
+  const [ocrCsvFollowUp, setOcrCsvFollowUp] = useState(/** @type {string[]} */ ([]));
   /** User cancelled mid-scan or navigated away from processing. */
   const scanCancelledRef = useRef(false);
   /** Abort in-flight Anthropic request when user cancels. */
@@ -243,6 +303,27 @@ export default function App() {
   }, [effectiveCatalog]);
 
   const { categories, payments, currencyCode, locale, dateLocale, footerLine1, footerLine2 } = effectiveCatalog;
+
+  const externalLlmImagePrompt = useMemo(() => {
+    const catNames = (categories || []).map((c) => c.n).filter(Boolean);
+    const payNames = (payments || []).filter(Boolean);
+    return buildImageToExpenseCsvPrompt({
+      categories: catNames,
+      payments: payNames,
+      today: new Date().toISOString().split("T")[0],
+    });
+  }, [categories, payments]);
+
+  const copyExternalLlmImagePrompt = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(externalLlmImagePrompt);
+      setDataToast("Copied prompt — open any AI, paste, attach your image, then paste CSV back here");
+      window.setTimeout(() => setDataToast(""), 3200);
+    } catch {
+      setDataToast("Could not copy — select the gray box text and copy manually");
+      window.setTimeout(() => setDataToast(""), 3200);
+    }
+  }, [externalLlmImagePrompt]);
 
   const formatMoney = useCallback(
     (n) => fmt(n, { currency: currencyCode || undefined, locale: locale || undefined }),
@@ -1273,6 +1354,7 @@ export default function App() {
 
   async function convertOcrTextToCsv() {
     setOcrCsvErr("");
+    setOcrCsvFollowUp([]);
     if (!ocrCsvText.trim()) {
       setOcrCsvErr("Paste OCR text or run OCR on an image first.");
       return;
@@ -1281,11 +1363,12 @@ export default function App() {
     try {
       const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
       const payNames = (catalogRef.current.payments || []).filter(Boolean);
-      const csv = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
+      const { csv, followUpQuestions } = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
         categories: catNames,
         payments: payNames,
       });
       setOcrCsvOut(csv);
+      setOcrCsvFollowUp(followUpQuestions);
     } catch (e) {
       console.error(e);
       setOcrCsvErr(e instanceof Error ? e.message : "Conversion failed. Try again.");
@@ -1307,6 +1390,7 @@ export default function App() {
     const f = input.files?.[0];
     if (!f) return;
     setOcrCsvErr("");
+    setOcrCsvFollowUp([]);
     setOcrCsvTessBusy(true);
     try {
       const text = await extractTextFromFile(f, () => {});
@@ -2526,7 +2610,11 @@ export default function App() {
                 }}
               >
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-                  Upload a receipt photo, paste text, or use the mic to dictate — OpenAI converts it to your expense CSV format.
+                  Upload a receipt photo, paste text, or use the mic. Images are read with Tesseract OCR (same engine family as{" "}
+                  <a href="https://github.com/tesseract-ocr/tesseract" target="_blank" rel="noopener noreferrer" style={{ color: T.blue }}>
+                    tesseract-ocr/tesseract
+                  </a>
+                  ), then OpenAI turns the text into CSV; if something is missing, we ask you to add it below and convert again.
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                   <button
@@ -2588,6 +2676,12 @@ export default function App() {
                 >
                   {ocrCsvBusy ? "Converting…" : "Convert to CSV"}
                 </button>
+                <ExternalLlmCsvPromptPanel
+                  prompt={externalLlmImagePrompt}
+                  onCopy={copyExternalLlmImagePrompt}
+                  disabled={ocrCsvBusy || ocrCsvTessBusy}
+                  blurb="Use this in ChatGPT, Claude, Gemini, Copilot, Grok, or any vision model: copy the prompt, paste it there, attach your receipt or bank screenshot, then copy the CSV from the reply into the text area above (or into a .csv file). Plain CSV is listed first; JSON is the fallback if the chat UI breaks line breaks."
+                />
                 {ocrCsvErr && (
                   <div
                     style={{
@@ -2602,6 +2696,32 @@ export default function App() {
                     }}
                   >
                     {ocrCsvErr}
+                  </div>
+                )}
+                {ocrCsvFollowUp.length > 0 && (
+                  <div
+                    style={{
+                      background: T.card2,
+                      border: `1px solid ${T.bdr}`,
+                      borderRadius: T.r,
+                      padding: "12px 14px",
+                      marginBottom: 12,
+                      fontSize: 13,
+                      color: T.txt,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, marginBottom: 8, color: T.sub }}>Please add or confirm</div>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {ocrCsvFollowUp.map((q, i) => (
+                        <li key={i} style={{ marginBottom: 4 }}>
+                          {q}
+                        </li>
+                      ))}
+                    </ul>
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 10 }}>
+                      Type answers or fixes in the text box above, then tap <strong>Convert to CSV</strong> again.
+                    </div>
                   </div>
                 )}
                 {ocrCsvOut ? (
@@ -2773,6 +2893,12 @@ export default function App() {
                 >
                   {importSaving ? "Saving…" : `Add ${importBundle.rows.filter((r) => r.ok).length} expenses`}
                 </button>
+                <ExternalLlmCsvPromptPanel
+                  prompt={externalLlmImagePrompt}
+                  onCopy={copyExternalLlmImagePrompt}
+                  disabled={importSaving}
+                  blurb="For your next receipt or screenshot: use any external AI with this same prompt, then paste the CSV into Add → OCR → CSV or save as a file for import. Works across vendors because it asks for raw CSV (or one JSON object) with your catalog names baked in."
+                />
               </div>
             )}
 

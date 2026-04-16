@@ -69,12 +69,13 @@ import {
   isVisionTransactionList,
   buildImportRowsFromVisionTransactions,
 } from "./scanAi.js";
-import { convertOcrToCsv } from "./ocrConvert.js";
+import { convertOcrToCsv, convertBillToCsvRobust } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
-import { extractTextFromFile } from "./docExtract.js";
+import { extractTextFromFile, fileToDataUrl } from "./docExtract.js";
 import { TxDetail } from "./TxDetail.jsx";
 import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
+import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -143,6 +144,8 @@ export default function App() {
   const stmtRef = useRef();
   const csvRef = useRef();
   const ocrCsvImgRef = useRef();
+  /** Last uploaded image on OCR→CSV (for vision fallback when local OCR → CSV is weak). */
+  const ocrCsvImageDataUrlRef = useRef(null);
   const mainScrollRef = useRef(null);
   /** Paste OCR / bill text → OpenAI → import-ready CSV (dev: Vite /api/convert). */
   const [ocrCsvText, setOcrCsvText] = useState("");
@@ -1278,7 +1281,10 @@ export default function App() {
     try {
       const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
       const payNames = (catalogRef.current.payments || []).filter(Boolean);
-      const csv = await convertOcrToCsv(ocrCsvText, { categories: catNames, payments: payNames });
+      const csv = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
+        categories: catNames,
+        payments: payNames,
+      });
       setOcrCsvOut(csv);
     } catch (e) {
       console.error(e);
@@ -1288,6 +1294,14 @@ export default function App() {
     }
   }
 
+  const appendOcrFromVoice = useCallback((spoken) => {
+    setOcrCsvText((p) => {
+      const s = spoken.trim();
+      if (!s) return p;
+      return p.trim() ? `${p.trim()}\n\n${s}` : s;
+    });
+  }, []);
+
   async function fillOcrFromImageFile(e) {
     const input = e.target;
     const f = input.files?.[0];
@@ -1296,6 +1310,11 @@ export default function App() {
     setOcrCsvTessBusy(true);
     try {
       const text = await extractTextFromFile(f, () => {});
+      if (f.type.startsWith("image/")) {
+        ocrCsvImageDataUrlRef.current = await fileToDataUrl(f);
+      } else {
+        ocrCsvImageDataUrlRef.current = null;
+      }
       setOcrCsvText((prev) => {
         const p = prev.trim();
         return p ? `${p}\n\n${text}` : text;
@@ -2507,7 +2526,7 @@ export default function App() {
                 }}
               >
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-                  Upload a receipt photo or paste OCR text — OpenAI converts it to your expense CSV format automatically.
+                  Upload a receipt photo, paste text, or use the mic to dictate — OpenAI converts it to your expense CSV format.
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                   <button
@@ -2527,6 +2546,11 @@ export default function App() {
                     {ocrCsvTessBusy ? "Extracting text…" : "Extract text from file"}
                   </button>
                 </div>
+                <OcrCsvVoiceControls
+                  active={step === "ocrCsv"}
+                  disabled={ocrCsvBusy || ocrCsvTessBusy}
+                  onAppend={appendOcrFromVoice}
+                />
                 <label style={lbl}>OCR / bill text</label>
                 <textarea
                   value={ocrCsvText}

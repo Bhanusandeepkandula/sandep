@@ -3,7 +3,7 @@
  * Requires VITE_OPENAI_API_KEY to be set at build time.
  */
 
-import { ensureExpenseCsvHeaderRow, matchCatalogName } from "./importParse.js";
+import { ensureExpenseCsvHeaderRow, matchCatalogName, parseExpenseCsv } from "./importParse.js";
 
 const OPENAI_KEY = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
@@ -162,4 +162,166 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
   const withHeader = ensureExpenseCsvHeaderRow(csv);
   // Post-process: guarantee category/payment exactly match catalog entries
   return fixCatalogColumns(withHeader, categories, payments);
+}
+
+/** True when CSV parses to at least one valid expense row. */
+function assessExpenseCsvQuality(csvString, categories, payments) {
+  const withHeader = ensureExpenseCsvHeaderRow(csvString);
+  const { rows, fatal } = parseExpenseCsv(withHeader, { categories, payments });
+  if (fatal) return false;
+  return rows.some((r) => r.ok);
+}
+
+/**
+ * Pull JSON from vision model (may be wrapped in markdown).
+ * @param {string} raw
+ */
+function parseVisionIntentJson(raw) {
+  const t = String(raw || "")
+    .trim()
+    .replace(/^```json?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    const m = t.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+  }
+  throw new Error("Could not read the AI response. Try again.");
+}
+
+const VISION_SYSTEM_PROMPT = `You analyze photos and screenshots for a personal expense app.
+
+STEP 1 — INTENT (required):
+- "supported": The image shows a paper receipt, invoice, bill, bank/credit app transaction list, payment confirmation, or any screen where monetary expenses can be read.
+- "unsupported": The image is NOT suitable — e.g. selfie, landscape, chat app, social media, game, settings screen with no amounts, blank, unreadable, or unrelated to spending.
+
+STEP 2 — If "unsupported":
+Return ONLY valid JSON: {"intent":"unsupported","message":"Short reason for the user (one sentence)."}
+Do not include csv.
+
+STEP 3 — If "supported":
+Return ONLY valid JSON: {"intent":"supported","csv_lines":["date,amount,category,payment,notes,tags","first data row",...]}
+Use the array "csv_lines" where index 0 is the header line (exactly matching the header below) and each following element is one CSV data row. This avoids escaping issues.
+
+CSV rules (same as text OCR):
+- First line MUST be exactly: ${HEADER_LINE}
+- One row per expense (grand total for a single receipt; one row per debit/purchase for bank lists).
+- Skip income, deposits, salary, credits (money IN).
+- date YYYY-MM-DD, amount positive number, category and payment MUST match the provided lists exactly (copy spelling).
+- notes: merchant or label, max ~60 chars.
+
+If the image is blurry but still financial, do your best; if truly unreadable, use intent unsupported with message explaining.`;
+
+/**
+ * Image → CSV via vision (no local OCR). Validates intent and CSV quality.
+ * @param {string} imageDataUrl data:image/...
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ */
+export async function convertBillImageToCsvVision(imageDataUrl, { categories = [], payments = [] } = {}) {
+  if (!OPENAI_KEY) {
+    throw new Error(
+      "OpenAI key not configured. Add VITE_OPENAI_API_KEY to your .env.local (dev) or GitHub repository secrets (production), then rebuild."
+    );
+  }
+
+  const catList = categories.length ? categories.join(", ") : "(none)";
+  const payList = payments.length ? payments.join(", ") : "(none)";
+  const today = new Date().toISOString().split("T")[0];
+
+  const userContent = [
+    { type: "text", text: `Categories (exact match): ${catList}\nPayments (exact match): ${payList}\nToday's date: ${today}\n\nAnalyze the image and respond with JSON only, following the system rules.` },
+    { type: "image_url", image_url: { url: imageDataUrl, detail: "auto" } },
+  ];
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: VISION_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `OpenAI error (${res.status})`;
+    if (res.status === 401) throw new Error("Invalid OpenAI API key. Check VITE_OPENAI_API_KEY.");
+    if (res.status === 429) throw new Error("OpenAI rate limit hit. Wait a moment and try again.");
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  const raw = String(data?.choices?.[0]?.message?.content || "").trim();
+  if (!raw) throw new Error("OpenAI returned an empty response. Try again.");
+
+  let parsed;
+  try {
+    parsed = parseVisionIntentJson(raw);
+  } catch {
+    throw new Error("Could not parse the AI response. Try again with a clearer image.");
+  }
+
+  if (parsed.intent === "unsupported") {
+    const m = typeof parsed.message === "string" && parsed.message.trim() ? parsed.message.trim() : "This image does not look like a bill or transaction screen.";
+    throw new Error(m);
+  }
+
+  let csv = "";
+  if (Array.isArray(parsed.csv_lines) && parsed.csv_lines.length > 0) {
+    csv = parsed.csv_lines.map((/** @type {unknown} */ x) => String(x).trim()).filter(Boolean).join("\n");
+  } else if (typeof parsed.csv === "string" && parsed.csv.trim()) {
+    csv = parsed.csv.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  }
+
+  if (parsed.intent !== "supported" || !csv.trim()) {
+    throw new Error("Could not extract expenses from this image. Try a receipt or bank transaction screenshot.");
+  }
+  const withHeader = ensureExpenseCsvHeaderRow(csv);
+  const fixed = fixCatalogColumns(withHeader, categories, payments);
+
+  if (!assessExpenseCsvQuality(fixed, categories, payments)) {
+    throw new Error(
+      "The image was recognized but no valid expense rows could be built. Try a clearer photo, stronger lighting, or crop to the transaction area."
+    );
+  }
+
+  return fixed;
+}
+
+/**
+ * 1) Local OCR text → OpenAI → CSV. If quality is poor and an image is available, 2) send the image to vision.
+ * @param {string} ocrText from Tesseract / paste / PDF text
+ * @param {string | null} imageDataUrl optional screenshot/photo data URL for fallback
+ * @param {{ categories?: string[]; payments?: string[] }} catalog
+ */
+export async function convertBillToCsvRobust(ocrText, imageDataUrl, { categories = [], payments = [] } = {}) {
+  const trimmed = ocrText.trim();
+  let textCsv = null;
+
+  if (trimmed.length) {
+    textCsv = await convertOcrToCsv(trimmed, { categories, payments });
+    if (assessExpenseCsvQuality(textCsv, categories, payments)) {
+      return textCsv;
+    }
+  }
+
+  if (imageDataUrl && String(imageDataUrl).startsWith("data:image/")) {
+    return await convertBillImageToCsvVision(imageDataUrl, { categories, payments });
+  }
+
+  if (textCsv) {
+    return textCsv;
+  }
+
+  throw new Error("Paste or upload bill text, or upload an image so we can read it with AI.");
 }

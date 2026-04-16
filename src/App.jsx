@@ -349,6 +349,8 @@ export default function App({ onReady }) {
   const seenTxIdsRef = useRef(null);
   /** Tracks mirror tx ids we've already notified for (prevents duplicate toasts across reconnects). */
   const notifiedMirrorIdsRef = useRef(new Set());
+  /** Tracks last-known amount for each mirror so we can notify on master edits. */
+  const mirrorAmountRef = useRef({});
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -499,6 +501,7 @@ export default function App({ onReady }) {
       setProfileTagUuid("");
       seenTxIdsRef.current = null;
       notifiedMirrorIdsRef.current = new Set();
+      mirrorAmountRef.current = {};
       if (authChecked) {
         setFbStatus("auth");
         setFbErrorDetail("");
@@ -612,60 +615,79 @@ export default function App({ onReady }) {
           const prevSeen = seenTxIdsRef.current;
           if (prevSeen !== null) {
             for (const tx of rows) {
-              if (prevSeen.has(tx.id)) continue;
-              if (notifiedMirrorIdsRef.current.has(tx.id)) continue;
               const isMirror =
                 typeof tx.syncedFromUid === "string" &&
                 tx.syncedFromUid.trim() &&
                 tx.syncedFromUid !== uidRef.current;
               if (!isMirror) continue;
-              notifiedMirrorIdsRef.current.add(tx.id);
+
               const selfUuid = profileTagUuidRef.current || "";
               const selfEntry = Array.isArray(tx?.split?.people)
-                ? tx.split.people.find((p) => p && typeof p.u === "string" && p.u === selfUuid)
+                ? tx.split.people.find((p) => p && (
+                    (typeof p.fuid === "string" && p.fuid === uidRef.current) ||
+                    (typeof p.u === "string" && p.u === selfUuid)
+                  ))
                 : null;
               const rawShare = selfEntry && typeof selfEntry.a === "number" && Number.isFinite(selfEntry.a)
-                ? selfEntry.a
-                : null;
+                ? selfEntry.a : null;
               const amtFmt = rawShare != null
                 ? formatMoneyRef.current(rawShare)
                 : formatMoneyRef.current(Number(tx.amount) || 0);
               const merchant = (typeof tx.notes === "string" && tx.notes.trim()) || tx.category || "Expense";
-              const splitBody = `${merchant} · your share ${amtFmt} (bill ${formatMoneyRef.current(Number(tx.amount) || 0)})`;
-              dlg.toast(splitBody, {
-                type: "info",
-                title: "New split received",
-                duration: 7000,
-                actionLabel: "View",
-                onClick: () => {
-                  setSelectedTx(tx);
-                  setTab("home");
-                },
-              });
-              // Browser push notification so it works even when the tab is in the background
-              try {
-                if ("Notification" in window) {
-                  if (Notification.permission === "default") {
-                    void Notification.requestPermission();
+
+              const isNew = !prevSeen.has(tx.id) && !notifiedMirrorIdsRef.current.has(tx.id);
+              const prevAmt = mirrorAmountRef.current[tx.id];
+              const curAmt = Number(tx.amount) || 0;
+              const isUpdated = prevSeen.has(tx.id) && prevAmt !== undefined && prevAmt !== curAmt;
+
+              if (isNew) {
+                notifiedMirrorIdsRef.current.add(tx.id);
+                const body = `${merchant} · your share ${amtFmt} (bill ${formatMoneyRef.current(curAmt)})`;
+                dlg.toast(body, {
+                  type: "info",
+                  title: "New split received",
+                  duration: 7000,
+                  actionLabel: "View",
+                  onClick: () => { setSelectedTx(tx); setTab("home"); },
+                });
+                try {
+                  if ("Notification" in window) {
+                    if (Notification.permission === "default") void Notification.requestPermission();
+                    if (Notification.permission === "granted") {
+                      const n = new Notification("New split received 💸", {
+                        body,
+                        tag: `split-${tx.id}`,
+                        icon: "/favicon.ico",
+                      });
+                      n.onclick = () => { window.focus(); setSelectedTx(tx); setTab("home"); };
+                    }
                   }
-                  if (Notification.permission === "granted") {
-                    const n = new Notification("New split received 💸", {
-                      body: splitBody,
-                      tag: `split-${tx.id}`,
-                      icon: "/favicon.ico",
-                    });
-                    n.onclick = () => {
-                      window.focus();
-                      setSelectedTx(tx);
-                      setTab("home");
-                    };
+                  if ("vibrate" in navigator) navigator.vibrate([120, 60, 120]);
+                } catch { /* ignore */ }
+              } else if (isUpdated) {
+                const body = `${merchant} updated · your share ${amtFmt} (bill ${formatMoneyRef.current(curAmt)})`;
+                dlg.toast(body, {
+                  type: "info",
+                  title: "Split updated",
+                  duration: 5000,
+                  actionLabel: "View",
+                  onClick: () => { setSelectedTx(tx); setTab("home"); },
+                });
+                try {
+                  if ("Notification" in window && Notification.permission === "granted") {
+                    const n = new Notification("Split updated 💸", { body, tag: `split-upd-${tx.id}`, icon: "/favicon.ico" });
+                    n.onclick = () => { window.focus(); setSelectedTx(tx); setTab("home"); };
                   }
-                }
-                // Vibrate on mobile when a split arrives
-                if ("vibrate" in navigator) navigator.vibrate([120, 60, 120]);
-              } catch {
-                /* ignore — notification API not available */
+                } catch { /* ignore */ }
               }
+              mirrorAmountRef.current[tx.id] = curAmt;
+            }
+          }
+          // Seed amounts for all mirrors on first load (no notification, just baseline)
+          if (prevSeen === null) {
+            for (const tx of rows) {
+              const isMirror = typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== uidRef.current;
+              if (isMirror) mirrorAmountRef.current[tx.id] = Number(tx.amount) || 0;
             }
           }
           seenTxIdsRef.current = new Set(rows.map((r) => r.id));
@@ -872,12 +894,22 @@ export default function App({ onReady }) {
 
   async function editTransaction(txId, updates) {
     if (!txId || !updates || typeof updates !== "object") return;
+    const prevTx = txs.find((t) => t.id === txId);
     setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, ...updates } : t)));
     setSelectedTx((st) => (st && st.id === txId ? { ...st, ...updates } : st));
     if (uidRef.current) {
       try {
         const ref = doc(db, "users", uidRef.current, "transactions", txId);
         await setDoc(ref, sanitizeForFirestore(updates), { merge: true });
+        // Master: push edits to all mirror copies so slaves see changes in real-time
+        const isMaster = !prevTx?.syncedFromUid || prevTx.syncedFromUid === uidRef.current;
+        const merged = prevTx ? { ...prevTx, ...updates } : null;
+        if (isMaster && merged?.split?.people?.length) {
+          const enrichedSplit = enrichSplitPeopleFromContacts(merged.split, people);
+          upsertSplitMirrors(db, uidRef.current, { ...merged, split: enrichedSplit }).catch((e) =>
+            console.error("editTransaction: mirror push failed:", e)
+          );
+        }
       } catch (e) {
         console.error("Failed to save edit:", e);
       }
@@ -5570,7 +5602,7 @@ export default function App({ onReady }) {
     {/* Transaction detail overlay */}
     {selectedTx && (
       <TxDetail
-        tx={selectedTx}
+        tx={txs.find((t) => t.id === selectedTx.id) ?? selectedTx}
         categories={categories}
         payments={catalogRef.current.payments || []}
         formatMoney={formatMoney}

@@ -28,12 +28,27 @@ import {
   X,
   LogOut,
   Copy,
+  Trash2,
+  QrCode,
+  ScanLine,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { T, card, card2, inp, lbl, pill } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
-import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  deleteDoc,
+  writeBatch,
+  updateDoc,
+  deleteField,
+} from "firebase/firestore";
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
 import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
@@ -53,6 +68,14 @@ import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 import { extractTextFromFile } from "./docExtract.js";
 import { TxDetail } from "./TxDetail.jsx";
+import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
+import {
+  buildSplitSharePayload,
+  parseSplitSharePayload,
+  normalizePerson,
+  sameSplitPerson,
+  personStableKey,
+} from "./splitContactShare.js";
 
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 
@@ -123,6 +146,9 @@ export default function App() {
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
+  /** Timestamp of last saved AI insights (Firestore); new generation replaces stored tips. */
+  const [aiInsightsUpdatedAt, setAiInsightsUpdatedAt] = useState(0);
+  const [insightHomeDismissRev, setInsightHomeDismissRev] = useState(0);
 
   const [showBM, setShowBM] = useState(false);
   const [bmCat, setBmCat] = useState("");
@@ -144,6 +170,15 @@ export default function App() {
   const [profileTagUuid, setProfileTagUuid] = useState("");
   const [deviceProfiles, setDeviceProfiles] = useState(() => loadProfiles());
   const [signInIdCopied, setSignInIdCopied] = useState(false);
+  /** PIN confirmation modal: delete all expenses for the signed-in Firebase account. */
+  const [deleteAllModal, setDeleteAllModal] = useState(false);
+  const [deleteAllPin, setDeleteAllPin] = useState("");
+  const [deleteAllErr, setDeleteAllErr] = useState("");
+  const [deleteAllBusy, setDeleteAllBusy] = useState(false);
+  const [dataToast, setDataToast] = useState("");
+  const [showProfileQr, setShowProfileQr] = useState(false);
+  const [profileQrCopied, setProfileQrCopied] = useState(false);
+  const [showSplitScan, setShowSplitScan] = useState(false);
   const layout = useShellLayout();
   const { maxShell, w: vw, px, twoCol, comfortable, chart, safeBottom, safeTop, isMobile } = layout;
   const uidRef = useRef(null);
@@ -337,7 +372,9 @@ export default function App() {
           }
           const d = snap.data();
           if (d.budgets && typeof d.budgets === "object") setBudgets(d.budgets);
-          if (Array.isArray(d.people)) setPeople(d.people);
+          if (Array.isArray(d.people)) {
+            setPeople(d.people.map((x) => normalizePerson(x)).filter((p) => p.n));
+          }
           setProfileName(typeof d.profileName === "string" ? d.profileName : "");
           setProfileEmail(typeof d.profileEmail === "string" ? d.profileEmail : "");
           const uuidFromDoc =
@@ -349,6 +386,14 @@ export default function App() {
           else setUserCategories(null);
           if (Array.isArray(d.userPayments) && d.userPayments.length > 0) setUserPayments(d.userPayments);
           else setUserPayments(null);
+          if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
+            setTips(d.aiInsights.items);
+            setAiInsightsUpdatedAt(
+              typeof d.aiInsights.updatedAt === "number" && Number.isFinite(d.aiInsights.updatedAt)
+                ? d.aiInsights.updatedAt
+                : 0
+            );
+          }
         });
 
         try {
@@ -369,7 +414,9 @@ export default function App() {
               const o = JSON.parse(raw);
               if (Array.isArray(o.txs)) setTxs(o.txs);
               if (o.budgets && typeof o.budgets === "object") setBudgets(o.budgets);
-              if (Array.isArray(o.people)) setPeople(o.people);
+              if (Array.isArray(o.people)) {
+                setPeople(o.people.map((x) => normalizePerson(x)).filter((p) => p.n));
+              }
               if (Array.isArray(o.userCategories) && o.userCategories.length > 0) setUserCategories(o.userCategories);
               if (Array.isArray(o.userPayments) && o.userPayments.length > 0) setUserPayments(o.userPayments);
             } else {
@@ -425,6 +472,81 @@ export default function App() {
   useEffect(() => {
     setDeviceProfiles(loadProfiles());
   }, [firebaseUser?.uid]);
+
+  useEffect(() => {
+    setTips([]);
+    setAiInsightsUpdatedAt(0);
+  }, [firebaseUser?.uid]);
+
+  async function persistPeople(nextList) {
+    const norm = nextList.map(normalizePerson).filter((p) => p.n);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { people: norm }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    setPeople(norm);
+  }
+
+  async function handleSplitContactDecoded(rawText) {
+    const parsed = parseSplitSharePayload(rawText);
+    if (!parsed?.n) {
+      window.alert("Invalid code. Ask your friend to open Profile and tap the QR icon.");
+      setShowSplitScan(false);
+      return;
+    }
+    const selfEmail = (firebaseUser?.email || "").trim();
+    const selfU = (profileTagUuid || "").trim();
+    if (parsed.e && selfEmail && parsed.e === selfEmail && parsed.u && selfU && parsed.u === selfU) {
+      window.alert("That's your own code.");
+      setShowSplitScan(false);
+      return;
+    }
+    const entry = normalizePerson({ n: parsed.n, e: parsed.e || undefined, u: parsed.u || undefined });
+    const list = people.map(normalizePerson);
+    if (list.some((x) => sameSplitPerson(x, entry))) {
+      window.alert(`${entry.n} is already in your split contacts.`);
+      setShowSplitScan(false);
+      return;
+    }
+    await persistPeople([...list, entry]);
+    setShowSplitScan(false);
+  }
+
+  async function updateTransactionSplit(txId, splitPayload) {
+    const cleaned =
+      splitPayload && splitPayload.people?.length
+        ? {
+            type: splitPayload.type === "custom" ? "custom" : "equal",
+            people: splitPayload.people.map((p) => ({
+              n: String(p.n || "").trim(),
+              a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0,
+            })),
+          }
+        : null;
+
+    if (!uidRef.current) {
+      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: cleaned } : t)));
+      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: cleaned } : st));
+      return;
+    }
+    try {
+      const ref = doc(db, "users", uidRef.current, "transactions", txId);
+      if (cleaned == null) {
+        await updateDoc(ref, { split: deleteField() });
+      } else {
+        await setDoc(ref, sanitizeForFirestore({ split: cleaned }), { merge: true });
+      }
+      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: cleaned } : t)));
+      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: cleaned } : st));
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not save split. Check your connection.");
+    }
+  }
 
   async function switchToDeviceProfile(p) {
     if (!p?.email) return;
@@ -505,6 +627,42 @@ export default function App() {
     return m;
   }, [monthTxs]);
 
+  /** Budgets tab: over-limit first, then by % used (desc), then name. */
+  const budgetEntriesSorted = useMemo(() => {
+    return Object.entries(budgets).sort(([ca, la], [cb, lb]) => {
+      const sa = catSpent[ca] || 0;
+      const sb = catSpent[cb] || 0;
+      const oa = sa > la;
+      const ob = sb > lb;
+      if (oa !== ob) return oa ? -1 : 1;
+      const ra = la > 0 ? sa / la : 0;
+      const rb = lb > 0 ? sb / lb : 0;
+      if (rb !== ra) return rb - ra;
+      return ca.localeCompare(cb);
+    });
+  }, [budgets, catSpent]);
+
+  /** Home “AI tip” strip hidden until the next generation (localStorage keyed by generation time). */
+  const showHomeAiTipBanner = useMemo(() => {
+    if (!tips.length || !firebaseUser?.uid || !aiInsightsUpdatedAt) return false;
+    try {
+      if (localStorage.getItem(`track_ai_insights_home_${firebaseUser.uid}`) === String(aiInsightsUpdatedAt)) return false;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }, [tips, firebaseUser?.uid, aiInsightsUpdatedAt, insightHomeDismissRev]);
+
+  function dismissHomeAiTipBanner() {
+    if (!firebaseUser?.uid || !aiInsightsUpdatedAt) return;
+    try {
+      localStorage.setItem(`track_ai_insights_home_${firebaseUser.uid}`, String(aiInsightsUpdatedAt));
+    } catch {
+      /* ignore */
+    }
+    setInsightHomeDismissRev((n) => n + 1);
+  }
+
   const loggedToday = todayTxs.length > 0;
 
   async function delTx(id) {
@@ -517,6 +675,59 @@ export default function App() {
       return;
     }
     setTxs((p) => p.filter((t) => t.id !== id));
+  }
+
+  async function confirmDeleteAllExpenses() {
+    setDeleteAllErr("");
+    const email = firebaseUser?.email;
+    if (!email) {
+      setDeleteAllErr("Not signed in.");
+      return;
+    }
+    if (!isValidPin(deleteAllPin)) {
+      setDeleteAllErr("Enter your 4-digit PIN.");
+      return;
+    }
+    setDeleteAllBusy(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, pinToPassword(deleteAllPin));
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error("No user after sign-in.");
+
+      const colRef = collection(db, "users", uid, "transactions");
+      const snap = await getDocs(colRef);
+      const docs = snap.docs;
+      for (let i = 0; i < docs.length; i += 450) {
+        const batch = writeBatch(db);
+        for (const d of docs.slice(i, i + 450)) {
+          batch.delete(d.ref);
+        }
+        await batch.commit();
+      }
+
+      if (!uidRef.current) {
+        setTxs([]);
+      }
+
+      setDeleteAllModal(false);
+      setDeleteAllPin("");
+      setDeleteAllErr("");
+      setDataToast("All expenses deleted for this account.");
+      setTimeout(() => setDataToast(""), 4500);
+    } catch (e) {
+      const code = e?.code || "";
+      if (
+        code === "auth/wrong-password" ||
+        code === "auth/invalid-credential" ||
+        code === "auth/invalid-login-credentials"
+      ) {
+        setDeleteAllErr("Wrong PIN.");
+      } else {
+        setDeleteAllErr(e?.message || String(e));
+      }
+    } finally {
+      setDeleteAllBusy(false);
+    }
   }
 
   function scrollExpenseFormTop() {
@@ -1134,7 +1345,21 @@ export default function App() {
       } catch {
         /* ignore */
       }
-      setTips(Array.isArray(parsed) ? parsed : []);
+      const nextTips = Array.isArray(parsed) ? parsed : [];
+      const ts = Date.now();
+      setTips(nextTips);
+      setAiInsightsUpdatedAt(ts);
+      if (uidRef.current) {
+        try {
+          await setDoc(
+            doc(db, "users", uidRef.current, "settings", "app"),
+            { aiInsights: { items: nextTips, updatedAt: ts } },
+            { merge: true }
+          );
+        } catch (persistErr) {
+          console.error("Could not save AI insights", persistErr);
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -1162,6 +1387,37 @@ export default function App() {
     setShowBM(false);
     setBmCat("");
     setBmAmt("");
+  }
+
+  async function removeBudgetCategory(cat) {
+    if (!cat || !(cat in budgets)) return;
+    if (!window.confirm(`Remove the monthly budget for “${cat}”?`)) return;
+    const next = { ...budgets };
+    delete next[cat];
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { budgets: next }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    setBudgets(next);
+  }
+
+  async function clearAllBudgets() {
+    const keys = Object.keys(budgets);
+    if (keys.length === 0) return;
+    if (!window.confirm(`Remove all ${keys.length} category budget${keys.length === 1 ? "" : "s"}? Monthly limits will be cleared.`)) return;
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { budgets: {} }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    setBudgets({});
   }
 
   function toggleSplitPerson(name) {
@@ -1446,7 +1702,7 @@ export default function App() {
               </div>
             )}
 
-            {tips.length > 0 && (
+            {showHomeAiTipBanner && tips[0] && (
               <div
                 style={{
                   margin: `0 ${px}px 14px`,
@@ -1454,10 +1710,35 @@ export default function App() {
                   border: "1px solid rgba(34,197,94,0.22)",
                   borderRadius: T.r,
                   padding: "12px 16px",
+                  position: "relative",
+                  paddingRight: 40,
                 }}
               >
+                <button
+                  type="button"
+                  aria-label="Dismiss insight"
+                  onClick={() => dismissHomeAiTipBanner()}
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    width: 30,
+                    height: 30,
+                    border: "none",
+                    borderRadius: T.r,
+                    background: "rgba(0,0,0,0.2)",
+                    color: T.sub,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                  }}
+                >
+                  <X size={16} strokeWidth={2.5} />
+                </button>
                 <div style={{ fontSize: 11, color: T.acc, fontWeight: 700, marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>
-                  <Sparkles size={11} /> AI TIP OF THE DAY
+                  <Sparkles size={11} /> AI INSIGHT
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{tips[0].title}</div>
                 <div style={{ fontSize: 12, color: T.sub }}>{tips[0].desc}</div>
@@ -1638,13 +1919,21 @@ export default function App() {
                     col: T.purp,
                   },
                   { mode: "image", icon: "📷", title: "Scan Receipt / Bill", sub: "AI extracts details from photo", col: T.blue },
-                  { mode: "statement", icon: "📄", title: "Upload Statement", sub: "Bank or credit card PDF", col: T.purp },
+                  {
+                    mode: "statement",
+                    icon: "📄",
+                    title: "Upload Statement",
+                    sub: "Bank or credit card PDF",
+                    col: T.purp,
+                    comingSoon: true,
+                  },
                 ].map((opt) => (
                   <div
                     key={opt.mode}
-                    role="button"
-                    tabIndex={0}
+                    role={opt.comingSoon ? undefined : "button"}
+                    tabIndex={opt.comingSoon ? -1 : 0}
                     onClick={() => {
+                      if (opt.comingSoon) return;
                       setAddMode(opt.mode);
                       if (opt.mode === "manual") setStep("form");
                       else if (opt.mode === "import") csvRef.current?.click();
@@ -1655,6 +1944,7 @@ export default function App() {
                       else stmtRef.current?.click();
                     }}
                     onKeyDown={(e) => {
+                      if (opt.comingSoon) return;
                       if (e.key === "Enter" || e.key === " ") {
                         setAddMode(opt.mode);
                         if (opt.mode === "manual") setStep("form");
@@ -1672,17 +1962,39 @@ export default function App() {
                       display: "flex",
                       alignItems: "center",
                       gap: 14,
-                      cursor: "pointer",
-                      borderColor: addMode === opt.mode ? opt.col : T.bdr,
-                      transition: "border-color .15s",
+                      cursor: opt.comingSoon ? "not-allowed" : "pointer",
+                      opacity: opt.comingSoon ? 0.55 : 1,
+                      borderColor: opt.comingSoon ? T.bdr : addMode === opt.mode ? opt.col : T.bdr,
+                      transition: "border-color .15s, opacity .15s",
                     }}
                   >
                     <div style={{ fontSize: 32 }}>{opt.icon}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700 }}>{opt.title}</div>
-                      <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{opt.sub}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {opt.title}
+                        {opt.comingSoon ? (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              textTransform: "uppercase",
+                              letterSpacing: 0.5,
+                              color: T.mut,
+                              border: `1px solid ${T.bdr}`,
+                              borderRadius: 6,
+                              padding: "2px 7px",
+                              background: T.card2,
+                            }}
+                          >
+                            Coming soon
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>
+                        {opt.comingSoon ? "PDF / Excel statement import — in development" : opt.sub}
+                      </div>
                     </div>
-                    <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                    <span style={{ color: T.mut, fontSize: 18 }}>{opt.comingSoon ? "—" : "›"}</span>
                   </div>
                 ))}
                 <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => void processFile(e, false)} />
@@ -2287,12 +2599,14 @@ export default function App() {
                       <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Select people to split with:</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                         {people.map((p) => {
-                          const sel = splitPpl.find((sp) => sp.n === p);
+                          const pn = normalizePerson(p);
+                          const label = pn.n;
+                          const sel = splitPpl.find((sp) => sp.n === label);
                           return (
                             <button
                               type="button"
-                              key={p}
-                              onClick={() => toggleSplitPerson(p)}
+                              key={personStableKey(pn)}
+                              onClick={() => toggleSplitPerson(label)}
                               style={{
                                 padding: "6px 12px",
                                 borderRadius: 999,
@@ -2306,7 +2620,7 @@ export default function App() {
                                 gap: 5,
                               }}
                             >
-                              👤 {p}
+                              👤 {label}
                               {sel && splitType === "equal" && <span style={{ fontWeight: 700 }}> {formatMoney(sel.a)}</span>}
                             </button>
                           );
@@ -2620,29 +2934,82 @@ export default function App() {
         {tab === "budgets" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 6,
+                }}
+              >
                 <div style={{ fontSize: 20, fontWeight: 800 }}>Budgets</div>
-                <button
-                  type="button"
-                  onClick={() => setShowBM(true)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "8px 16px",
-                    borderRadius: 10,
-                    background: T.acc,
-                    border: "none",
-                    color: "#000",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  + Set Budget
-                </button>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  {Object.keys(budgets).length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => void clearAllBudgets()}
+                      disabled={fbStatus !== "ready"}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "8px 14px",
+                        borderRadius: 10,
+                        border: `1px solid rgba(239,68,68,0.45)`,
+                        background: T.ddim,
+                        color: T.dng,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: fbStatus !== "ready" ? "not-allowed" : "pointer",
+                        opacity: fbStatus !== "ready" ? 0.5 : 1,
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Clear all
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBmCat("");
+                      setBmAmt("");
+                      setShowBM(true);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 16px",
+                      borderRadius: 10,
+                      background: T.acc,
+                      border: "none",
+                      color: "#000",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    + Set budget
+                  </button>
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: T.sub }}>Monthly budget tracking</div>
+              <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45 }}>
+                Monthly limits for this month’s spending.{" "}
+                {Object.keys(budgets).length > 0 ? (
+                  <>
+                    <strong style={{ color: T.txt }}>{Object.keys(budgets).length}</strong> categor
+                    {Object.keys(budgets).length === 1 ? "y" : "ies"} with a limit
+                    {budgetEntriesSorted.some(([c, l]) => (catSpent[c] || 0) > l) ? (
+                      <span style={{ color: T.warn }}> · Some are over limit</span>
+                    ) : null}
+                    .
+                  </>
+                ) : (
+                  "Add one or more categories to see progress bars and alerts on Home."
+                )}
+              </div>
             </div>
 
             <div
@@ -2654,11 +3021,13 @@ export default function App() {
                 border: `1px solid ${T.bdr}`,
               }}
             >
-              <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>Total Budgeted</div>
-              <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 12 }}>{formatMoney(Object.values(budgets).reduce((s, v) => s + v, 0))}</div>
-              <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>Total budgeted (this month)</div>
+              <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 12 }}>
+                {formatMoney(Object.values(budgets).reduce((s, v) => s + v, 0))}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
                 <div>
-                  <div style={{ fontSize: 11, color: T.sub }}>Spent</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>Spent (budgeted cats)</div>
                   <div style={{ fontSize: 17, fontWeight: 700, color: T.dng }}>
                     {formatMoney(Object.entries(budgets).reduce((s, [c]) => s + (catSpent[c] || 0), 0))}
                   </div>
@@ -2670,27 +3039,97 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11, color: T.sub }}>Over budget</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: T.warn }}>{Object.entries(budgets).filter(([c, l]) => (catSpent[c] || 0) > l).length} cats</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>Over limit</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: T.warn }}>
+                    {Object.entries(budgets).filter(([c, l]) => (catSpent[c] || 0) > l).length}{" "}
+                    {Object.entries(budgets).filter(([c, l]) => (catSpent[c] || 0) > l).length === 1 ? "category" : "categories"}
+                  </div>
                 </div>
               </div>
             </div>
 
             <div style={{ padding: `0 ${px}px` }}>
-              {Object.entries(budgets).map(([cat, limit]) => (
-                <div key={cat} style={{ ...card, marginBottom: 10 }}>
-                  <BudgetBar cat={cat} limit={limit} spent={catSpent[cat] || 0} categories={categories} formatMoney={formatMoney} />
+              {Object.keys(budgets).length === 0 ? (
+                <div
+                  style={{
+                    ...card,
+                    marginBottom: 14,
+                    textAlign: "center",
+                    padding: "28px 20px",
+                    borderStyle: "dashed",
+                  }}
+                >
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>No budgets yet</div>
+                  <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 16 }}>
+                    Set a monthly cap per category. We compare it to this month’s spending and warn you on Home when you’re close or over.
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setBmCat(cat);
-                      setBmAmt(String(limit));
+                      setBmCat("");
+                      setBmAmt("");
                       setShowBM(true);
                     }}
-                    style={{ background: "none", border: "none", color: T.sub, fontSize: 12, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 4 }}
+                    style={{
+                      padding: "12px 20px",
+                      borderRadius: T.r,
+                      background: T.acc,
+                      border: "none",
+                      color: "#000",
+                      fontWeight: 800,
+                      fontSize: 14,
+                      cursor: "pointer",
+                    }}
                   >
-                    <Pencil size={11} /> Edit limit
+                    + Add your first budget
                   </button>
+                </div>
+              ) : null}
+
+              {budgetEntriesSorted.map(([cat, limit]) => (
+                <div key={cat} style={{ ...card, marginBottom: 10 }}>
+                  <BudgetBar cat={cat} limit={limit} spent={catSpent[cat] || 0} categories={categories} formatMoney={formatMoney} />
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBmCat(cat);
+                        setBmAmt(String(limit));
+                        setShowBM(true);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: T.sub,
+                        fontSize: 12,
+                        cursor: "pointer",
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <Pencil size={11} /> Edit limit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void removeBudgetCategory(cat)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: T.dng,
+                        fontSize: 12,
+                        cursor: "pointer",
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <Trash2 size={12} strokeWidth={2} /> Remove
+                    </button>
+                  </div>
                 </div>
               ))}
 
@@ -2732,7 +3171,7 @@ export default function App() {
           <div style={{ padding: `${px + 8}px ${px}px 120px` }}>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 18 }}>Profile & Settings</div>
 
-            <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 14 }}>
               <div
                 style={{
                   width: 58,
@@ -2750,7 +3189,7 @@ export default function App() {
               >
                 {(profileName && profileName.trim()[0]) || "?"}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, paddingRight: 4 }}>
                 <div style={{ fontSize: 17, fontWeight: 800 }}>{profileName.trim() || "—"}</div>
                 {profileEmail.trim() ? (
                   <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>{profileEmail.trim()}</div>
@@ -2802,6 +3241,29 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+              {firebaseUser?.email ? (
+                <button
+                  type="button"
+                  title="Show QR code"
+                  aria-label="Show QR code for split contacts"
+                  onClick={() => setShowProfileQr(true)}
+                  style={{
+                    flexShrink: 0,
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    border: `1px solid ${T.bdrH}`,
+                    background: T.card2,
+                    color: T.acc,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <QrCode size={22} strokeWidth={2} />
+                </button>
+              ) : null}
             </div>
 
             <div style={{ ...card, marginBottom: 16 }}>
@@ -2874,6 +3336,51 @@ export default function App() {
               ))}
             </div>
 
+            <div
+              style={{
+                ...card,
+                marginBottom: 14,
+                borderColor: "rgba(239,68,68,0.35)",
+                background: T.ddim,
+              }}
+            >
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: T.dng, display: "flex", alignItems: "center", gap: 8 }}>
+                <Trash2 size={16} strokeWidth={2.2} />
+                Delete all expenses
+              </div>
+              <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
+                Permanently remove every expense in the cloud for{" "}
+                <strong style={{ color: T.txt }}>{profileName.trim() || "this account"}</strong> ({txs.length} now). Your PIN is required.
+                Categories, budgets, and profile settings stay.
+              </div>
+              <button
+                type="button"
+                disabled={!firebaseUser?.email || fbStatus !== "ready"}
+                onClick={() => {
+                  setDeleteAllErr("");
+                  setDeleteAllPin("");
+                  setDeleteAllModal(true);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: T.r,
+                  border: `1px solid rgba(239,68,68,0.5)`,
+                  background: "rgba(239,68,68,0.12)",
+                  color: T.dng,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer",
+                  opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.55 : 1,
+                }}
+              >
+                Delete all expenses…
+              </button>
+              {fbStatus !== "ready" ? (
+                <div style={{ fontSize: 11, color: T.mut, marginTop: 8 }}>Connect to the server to use this.</div>
+              ) : null}
+            </div>
+
             <div style={{ ...card, marginBottom: 14 }}>
               <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Settings</div>
               <button
@@ -2917,77 +3424,79 @@ export default function App() {
             </div>
 
             <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
                 <Users size={15} /> Split Contacts
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                {people.map((p) => (
-                  <div key={p} style={{ display: "flex", alignItems: "center", gap: 6, background: T.card2, borderRadius: 999, padding: "6px 12px", border: `1px solid ${T.bdr}` }}>
-                    <span style={{ fontSize: 13 }}>👤 {p}</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const next = people.filter((x) => x !== p);
-                        if (uidRef.current) {
-                          try {
-                            await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { people: next }, { merge: true });
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        } else {
-                          setPeople(next);
-                        }
-                      }}
-                      style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
+              <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.45, marginBottom: 12 }}>
+                Add people you split bills with. Scan their Profile QR to link their account (name + ID), or type a name only.
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {people.map((p) => {
+                  const pn = normalizePerson(p);
+                  return (
+                    <div
+                      key={personStableKey(pn)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, background: T.card2, borderRadius: 999, padding: "6px 12px", border: `1px solid ${T.bdr}` }}
+                    >
+                      <span style={{ fontSize: 13 }} title={pn.u || pn.e ? "Linked for shared splits" : undefined}>
+                        👤 {pn.n}
+                        {pn.u || pn.e ? <span style={{ fontSize: 10, color: T.acc, marginLeft: 4 }}>●</span> : null}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void persistPeople(people.map(normalizePerson).filter((x) => !sameSplitPerson(x, pn)))}
+                        style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input
                   placeholder="Add person…"
                   value={newP}
                   onChange={(e) => setNewP(e.target.value)}
-                  onKeyDown={async (e) => {
+                  onKeyDown={(e) => {
                     if (e.key === "Enter" && newP.trim()) {
                       const name = newP.trim();
-                      const next = [...people, name];
-                      if (uidRef.current) {
-                        try {
-                          await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { people: next }, { merge: true });
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      } else {
-                        setPeople(next);
-                      }
+                      void persistPeople([...people.map(normalizePerson), { n: name }]);
                       setNewP("");
                     }
                   }}
-                  style={{ ...inp, flex: 1 }}
+                  style={{ ...inp, flex: 1, minWidth: 140 }}
                 />
                 <button
                   type="button"
-                  onClick={async () => {
+                  onClick={() => {
                     if (!newP.trim()) return;
                     const name = newP.trim();
-                    const next = [...people, name];
-                    if (uidRef.current) {
-                      try {
-                        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { people: next }, { merge: true });
-                      } catch (err) {
-                        console.error(err);
-                      }
-                    } else {
-                      setPeople(next);
-                    }
+                    void persistPeople([...people.map(normalizePerson), { n: name }]);
                     setNewP("");
                   }}
                   style={{ padding: "0 18px", borderRadius: T.r, background: T.acc, border: "none", color: "#000", fontWeight: 700, cursor: "pointer" }}
                 >
                   Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSplitScan(true)}
+                  style={{
+                    padding: "0 14px",
+                    borderRadius: T.r,
+                    border: `1px solid ${T.acc}`,
+                    background: T.adim,
+                    color: T.acc,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <ScanLine size={16} />
+                  Scan
                 </button>
               </div>
             </div>
@@ -3104,7 +3613,225 @@ export default function App() {
         </div>
       ) : null}
 
-      {saveToast ? (
+      <SplitQrScanModal open={showSplitScan} onClose={() => setShowSplitScan(false)} onDecoded={(t) => void handleSplitContactDecoded(t)} />
+
+      {showProfileQr && firebaseUser?.email ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="profile-qr-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 535,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowProfileQr(false);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              background: T.card,
+              borderRadius: T.rLg,
+              padding: 22,
+              border: `1px solid ${T.bdr}`,
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+              <div id="profile-qr-title" style={{ fontSize: 17, fontWeight: 800 }}>
+                Split contact QR
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setShowProfileQr(false)}
+                style={{
+                  border: "none",
+                  background: T.card2,
+                  borderRadius: 8,
+                  padding: 8,
+                  cursor: "pointer",
+                  color: T.sub,
+                  display: "flex",
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 16 }}>
+              Friends tap <strong style={{ color: T.txt }}>Scan</strong> under Split Contacts and point at this code. They’ll get your name and linked ID so you can pick each other when splitting expenses.
+            </p>
+            <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 16px", background: "#fff", borderRadius: 12 }}>
+              <QRCodeSVG
+                value={buildSplitSharePayload({
+                  email: firebaseUser.email,
+                  uuid: profileTagUuid || "",
+                  name: profileName.trim() || "User",
+                })}
+                size={200}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#000000"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const t = buildSplitSharePayload({
+                  email: firebaseUser.email,
+                  uuid: profileTagUuid || "",
+                  name: profileName.trim() || "User",
+                });
+                void navigator.clipboard.writeText(t).then(() => {
+                  setProfileQrCopied(true);
+                  setTimeout(() => setProfileQrCopied(false), 2000);
+                });
+              }}
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: T.r,
+                border: `1px solid ${T.bdrH}`,
+                background: T.surf,
+                color: profileQrCopied ? T.acc : T.txt,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              <Copy size={16} />
+              {profileQrCopied ? "Copied text code" : "Copy text code"}
+            </button>
+            <div style={{ fontSize: 11, color: T.mut, lineHeight: 1.4 }}>
+              Includes your Sign-in ID and profile id — only share with people you trust.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteAllModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-all-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 520,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deleteAllBusy) {
+              setDeleteAllModal(false);
+              setDeleteAllPin("");
+              setDeleteAllErr("");
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 400,
+              background: T.card,
+              borderRadius: T.rLg,
+              padding: 22,
+              border: `1px solid rgba(239,68,68,0.35)`,
+              boxSizing: "border-box",
+            }}
+          >
+            <div id="delete-all-title" style={{ fontSize: 17, fontWeight: 800, marginBottom: 8, color: T.txt }}>
+              Delete all expenses?
+            </div>
+            <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 16 }}>
+              This cannot be undone. Enter the 4-digit PIN for <strong style={{ color: T.txt }}>{profileName.trim() || "this profile"}</strong> to
+              remove all {txs.length} expense{txs.length === 1 ? "" : "s"} from this account.
+            </div>
+            <label style={lbl}>PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={4}
+              value={deleteAllPin}
+              onChange={(e) => {
+                setDeleteAllPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+                setDeleteAllErr("");
+              }}
+              placeholder="••••"
+              style={{ ...inp, marginBottom: deleteAllErr ? 8 : 16, letterSpacing: 6, fontSize: 18 }}
+            />
+            {deleteAllErr ? (
+              <div style={{ fontSize: 13, color: T.dng, marginBottom: 12 }}>{deleteAllErr}</div>
+            ) : null}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                disabled={deleteAllBusy}
+                onClick={() => {
+                  if (!deleteAllBusy) {
+                    setDeleteAllModal(false);
+                    setDeleteAllPin("");
+                    setDeleteAllErr("");
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: T.r,
+                  border: `1px solid ${T.bdr}`,
+                  background: "transparent",
+                  color: T.sub,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: deleteAllBusy ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteAllBusy || deleteAllPin.length !== 4}
+                onClick={() => void confirmDeleteAllExpenses()}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: T.r,
+                  border: "none",
+                  background: T.dng,
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: deleteAllBusy || deleteAllPin.length !== 4 ? "not-allowed" : "pointer",
+                  opacity: deleteAllPin.length === 4 ? 1 : 0.65,
+                }}
+              >
+                {deleteAllBusy ? "Deleting…" : "Delete all"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {saveToast || dataToast ? (
         <div
           role="status"
           style={{
@@ -3141,7 +3868,13 @@ export default function App() {
           >
             <Check size={18} color={T.acc} strokeWidth={3} />
             <span>
-              Expense saved — <span style={{ color: T.acc }}>{saveToast}</span>
+              {dataToast ? (
+                <span style={{ color: T.acc }}>{dataToast}</span>
+              ) : (
+                <>
+                  Expense saved — <span style={{ color: T.acc }}>{saveToast}</span>
+                </>
+              )}
             </span>
           </div>
         </div>
@@ -3236,6 +3969,8 @@ export default function App() {
         categories={categories}
         formatMoney={formatMoney}
         dateLocale={dateLocale || locale}
+        splitContacts={people}
+        onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
         onClose={() => setSelectedTx(null)}
         onDelete={(id) => {
           delTx(id);

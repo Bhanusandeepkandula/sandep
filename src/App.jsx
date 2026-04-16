@@ -2082,7 +2082,7 @@ export default function App({ onReady }) {
       const ex = prev.find((p) => p.n === name);
       const nl = ex ? prev.filter((p) => p.n !== name) : [...prev, { n: name, a: 0 }];
       if (splitType === "equal" && form.amount && nl.length > 0) {
-        const each = parseFloat(form.amount) / nl.length;
+        const each = parseFloat(form.amount) / (nl.length + 1);
         const rounded = Math.round(each * 100) / 100;
         return nl.map((p) => ({ ...p, a: rounded }));
       }
@@ -4978,7 +4978,7 @@ export default function App({ onReady }) {
                 value={buildSplitSharePayload({
                   email: firebaseUser.email,
                   uuid: profileTagUuid || "",
-                  name: profileName.trim() || "User",
+                  name: profileName.trim() || (firebaseUser.email || "").split("@")[0] || "Friend",
                 })}
                 size={200}
                 level="M"
@@ -4992,7 +4992,7 @@ export default function App({ onReady }) {
                 const t = buildSplitSharePayload({
                   email: firebaseUser.email,
                   uuid: profileTagUuid || "",
-                  name: profileName.trim() || "User",
+                  name: profileName.trim() || (firebaseUser.email || "").split("@")[0] || "Friend",
                 });
                 void navigator.clipboard.writeText(t).then(() => {
                   setProfileQrCopied(true);

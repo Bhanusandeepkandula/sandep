@@ -65,9 +65,16 @@ export async function collectPeerUidsForSplit(db, split, ownerUid) {
   const out = [];
   for (const p of split.people) {
     const uuid = typeof p.u === "string" ? p.u.trim() : "";
-    if (!uuid) continue;
+    if (!uuid) {
+      console.warn("splitPeerSync: person has no profile UUID, cannot mirror:", p.n);
+      continue;
+    }
     const peer = await resolvePeerUid(db, uuid);
-    if (peer && peer !== ownerUid && !seen.has(peer)) {
+    if (!peer) {
+      console.warn("splitPeerSync: could not resolve peer UID for profile:", uuid, "person:", p.n);
+      continue;
+    }
+    if (peer !== ownerUid && !seen.has(peer)) {
       seen.add(peer);
       out.push(peer);
     }

@@ -80,7 +80,7 @@ export function TxDetail({
       const ex = prev.find((p) => p.n === name);
       const nl = ex ? prev.filter((p) => p.n !== name) : [...prev, { n: name, a: 0 }];
       if (splitType === "equal" && txAmt > 0 && nl.length > 0) {
-        const each = Math.round((txAmt / nl.length) * 100) / 100;
+        const each = Math.round((txAmt / (nl.length + 1)) * 100) / 100;
         return nl.map((p) => ({ ...p, a: each }));
       }
       return nl;
@@ -88,7 +88,7 @@ export function TxDetail({
   }
   function applyEqual(list) {
     if (!list.length || txAmt <= 0) return list;
-    const each = Math.round((txAmt / list.length) * 100) / 100;
+    const each = Math.round((txAmt / (list.length + 1)) * 100) / 100;
     return list.map((p) => ({ ...p, a: each }));
   }
 

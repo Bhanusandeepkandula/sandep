@@ -13,6 +13,24 @@ const HEADER_LINE = "date,amount,category,payment,notes,tags";
 const OCR_JSON_MAX_CHARS = 24_000;
 
 /**
+ * Force-replace the year portion of every YYYY-MM-DD date in CSV data rows
+ * with `correctYear`. Skips the header row. This is the ultimate safeguard
+ * against the model hallucinating a wrong year when the source has no year.
+ */
+function forceCorrectYearInCsv(csv, correctYear) {
+  if (!correctYear || !csv) return csv;
+  const yr = String(correctYear);
+  if (!/^\d{4}$/.test(yr)) return csv;
+  const lines = csv.split("\n");
+  return lines
+    .map((line, i) => {
+      if (i === 0) return line; // header
+      return line.replace(/\b\d{4}(-\d{2}-\d{2})\b/, `${yr}$1`);
+    })
+    .join("\n");
+}
+
+/**
  * @typedef {{ year?: string; month?: string }} OcrDateContext
  * User-supplied year/month so the model does not guess dates from screenshots.
  */
@@ -544,9 +562,13 @@ export async function convertBillToCsvRobust(ocrText, imageDataUrl, { categories
   /** @type {string[]} */
   let followAccum = [];
 
+  const forcedYear = dateContext?.year || String(new Date().getFullYear());
+  const sourceHasNoYear = ocrTextLooksMissingFourDigitYear(trimmed);
+  const applyYearFix = (csv) => (sourceHasNoYear ? forceCorrectYearInCsv(csv, forcedYear) : csv);
+
   if (trimmed.length) {
     const structured = await convertOcrToCsvStructured(trimmed, { categories, payments, dateContext });
-    textCsv = structured.csv;
+    textCsv = applyYearFix(structured.csv);
     followAccum = structured.followUpQuestions.slice();
     if (assessExpenseCsvQuality(textCsv, categories, payments)) {
       return { csv: textCsv, followUpQuestions: dedupeQuestions(followAccum) };
@@ -555,7 +577,7 @@ export async function convertBillToCsvRobust(ocrText, imageDataUrl, { categories
 
   if (imageDataUrl && String(imageDataUrl).startsWith("data:image/")) {
     const { csv, followUpQuestions } = await convertBillImageToCsvVision(imageDataUrl, { categories, payments, dateContext });
-    return { csv, followUpQuestions: dedupeQuestions([...followAccum, ...followUpQuestions]) };
+    return { csv: applyYearFix(csv), followUpQuestions: dedupeQuestions([...followAccum, ...followUpQuestions]) };
   }
 
   if (textCsv) {

@@ -38,9 +38,10 @@ import {
   Camera,
   ImageIcon,
   FileText,
+  Palette,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { T, card, card2, inp, lbl, pill } from "./config.js";
+import { T, card, card2, inp, lbl, pill, THEMES, applyTheme } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
@@ -311,6 +312,10 @@ export default function App({ onReady }) {
   const [userCurrency, setUserCurrency] = useState(null);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [reportFreq, setReportFreq] = useState("weekly");
+  const [userTheme, setUserTheme] = useState(() => {
+    try { return localStorage.getItem("track_theme") || "default"; } catch { return "default"; }
+  });
+  const [, setThemeVer] = useState(0);
 
   const [fbStatus, setFbStatus] = useState("loading");
   const [fbErrorDetail, setFbErrorDetail] = useState("");
@@ -410,6 +415,11 @@ export default function App({ onReady }) {
     });
     return () => unsub();
   }, [onReady]);
+
+  useEffect(() => {
+    applyTheme(userTheme);
+    setThemeVer((v) => v + 1);
+  }, [userTheme]);
 
   useEffect(() => {
     let active = true;
@@ -574,6 +584,7 @@ export default function App({ onReady }) {
           if (d.userCurrency && typeof d.userCurrency === "object" && d.userCurrency.code) setUserCurrency(d.userCurrency);
           else setUserCurrency(null);
           if (typeof d.reportFreq === "string" && ["daily", "weekly", "monthly"].includes(d.reportFreq)) setReportFreq(d.reportFreq);
+          if (typeof d.theme === "string" && THEMES[d.theme]) { setUserTheme(d.theme); try { localStorage.setItem("track_theme", d.theme); } catch {} }
           if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
             setTips(d.aiInsights.items);
             setAiInsightsUpdatedAt(
@@ -1970,6 +1981,18 @@ export default function App({ onReady }) {
   }
 
   const fixedTotal = fixedExpenses.reduce((s, f) => s + (f.amount || 0), 0);
+
+  async function saveTheme(themeId) {
+    setUserTheme(themeId);
+    try { localStorage.setItem("track_theme", themeId); } catch {}
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { theme: themeId }, { merge: true });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
 
   async function saveReportFreq(freq) {
     setReportFreq(freq);
@@ -4223,366 +4246,223 @@ export default function App({ onReady }) {
           <div style={{ padding: `${px + 8}px ${px}px 120px` }}>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 18 }}>Profile & Settings</div>
 
-            <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 14 }}>
+            {/* ─── Profile Card ─── */}
+            <div style={{ ...card, marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 14 }}>
               <div
                 style={{
-                  width: 58,
-                  height: 58,
-                  borderRadius: "50%",
+                  width: 52, height: 52, borderRadius: "50%",
                   background: `linear-gradient(135deg,${T.acc},${T.blue})`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22,
-                  fontWeight: 800,
-                  color: "#000",
-                  flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 20, fontWeight: 800, color: "#000", flexShrink: 0,
                 }}
               >
                 {(profileName && profileName.trim()[0]) || "?"}
               </div>
-              <div style={{ flex: 1, minWidth: 0, paddingRight: 4 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 17, fontWeight: 800 }}>{profileName.trim() || "—"}</div>
-                {profileEmail.trim() ? (
-                  <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>{profileEmail.trim()}</div>
-                ) : null}
+                {profileEmail.trim() ? <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{profileEmail.trim()}</div> : null}
                 {firebaseUser?.email ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 11, color: T.mut, marginBottom: 6 }}>Sign-in ID (other devices)</div>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                      <code
-                        style={{
-                          flex: 1,
-                          fontSize: 11,
-                          color: T.sub,
-                          wordBreak: "break-all",
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {firebaseUser.email}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const t = firebaseUser.email || "";
-                          if (!t) return;
-                          void navigator.clipboard.writeText(t).then(() => {
-                            setSignInIdCopied(true);
-                            setTimeout(() => setSignInIdCopied(false), 2000);
-                          });
-                        }}
-                        style={{
-                          flexShrink: 0,
-                          padding: "6px 10px",
-                          borderRadius: T.r,
-                          border: `1px solid ${T.bdrH}`,
-                          background: T.surf,
-                          color: signInIdCopied ? T.acc : T.sub,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <Copy size={14} />
-                        {signInIdCopied ? "Copied" : "Copy"}
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10, color: T.mut, marginBottom: 4 }}>Sign-in ID</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <code style={{ flex: 1, fontSize: 11, color: T.sub, wordBreak: "break-all", lineHeight: 1.3 }}>{firebaseUser.email}</code>
+                      <button type="button" onClick={() => { void navigator.clipboard.writeText(firebaseUser.email || "").then(() => { setSignInIdCopied(true); setTimeout(() => setSignInIdCopied(false), 2000); }); }} style={{ flexShrink: 0, padding: "4px 8px", borderRadius: 8, border: `1px solid ${T.bdrH}`, background: T.surf, color: signInIdCopied ? T.acc : T.sub, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+                        <Copy size={12} /> {signInIdCopied ? "Copied" : "Copy"}
                       </button>
                     </div>
                   </div>
                 ) : null}
               </div>
               {firebaseUser?.email ? (
-                <button
-                  type="button"
-                  title="Show QR code"
-                  aria-label="Show QR code for split contacts"
-                  onClick={() => setShowProfileQr(true)}
-                  style={{
-                    flexShrink: 0,
-                    width: 44,
-                    height: 44,
-                    borderRadius: 12,
-                    border: `1px solid ${T.bdrH}`,
-                    background: T.card2,
-                    color: T.acc,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <QrCode size={22} strokeWidth={2} />
+                <button type="button" title="Show QR code" onClick={() => setShowProfileQr(true)} style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, border: `1px solid ${T.bdrH}`, background: T.card2, color: T.acc, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <QrCode size={20} strokeWidth={2} />
                 </button>
               ) : null}
             </div>
 
-            <div style={{ ...card, marginBottom: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Users on this device</div>
-              <div style={{ fontSize: 12, color: T.sub, marginBottom: 12, lineHeight: 1.45 }}>
-                Names, PINs, and sign-in emails are saved in this browser for quick switching. Use{" "}
-                <strong style={{ color: T.txt }}>Sign-in ID</strong> above to sign in on another device. Transactions use{" "}
-                <code style={{ color: T.acc }}>appProfileUuid</code> in Firebase.
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {deviceProfiles.map((p) => {
-                  const isCurrent = p.email === firebaseUser?.email;
-                  const pinLabel = p.pin && isValidPin(p.pin) ? "••••" : "PIN not stored";
-                  return (
-                    <div
-                      key={p.email}
-                      style={{
-                        padding: 12,
-                        borderRadius: T.r,
-                        border: `1px solid ${isCurrent ? T.acc : T.bdr}`,
-                        background: isCurrent ? T.adim : T.card2,
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700 }}>{profileDisplayName(p)}</div>
-                          <div style={{ fontSize: 11, color: T.mut, marginTop: 4, fontFamily: "ui-monospace,monospace", wordBreak: "break-all" }}>
-                            {p.uuid || "—"}
-                          </div>
-                          <div style={{ fontSize: 11, color: T.sub, marginTop: 4 }}>
-                            PIN: {pinLabel} {isCurrent ? "(signed in)" : ""}
-                          </div>
-                        </div>
-                        {!isCurrent ? (
-                          <button
-                            type="button"
-                            onClick={() => void switchToDeviceProfile(p)}
-                            style={{
-                              flexShrink: 0,
-                              padding: "8px 12px",
-                              borderRadius: T.r,
-                              border: `1px solid ${T.bdrH}`,
-                              background: T.surf,
-                              color: T.acc,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Switch
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+            {/* ─── Stats Row ─── */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
               {[
                 { l: "Transactions", v: txs.length },
                 { l: "Categories", v: new Set(txs.map((t) => t.category)).size },
                 { l: "Budgets", v: Object.keys(budgets).length },
               ].map((s) => (
-                <div key={s.l} style={{ ...card2, textAlign: "center", padding: "14px 8px" }}>
-                  <div style={{ fontSize: 24, fontWeight: 800 }}>{s.v}</div>
-                  <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>{s.l}</div>
+                <div key={s.l} style={{ background: T.card2, borderRadius: T.r, border: `1px solid ${T.bdr}`, textAlign: "center", padding: "12px 6px" }}>
+                  <div style={{ fontSize: 22, fontWeight: 800 }}>{s.v}</div>
+                  <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>{s.l}</div>
                 </div>
               ))}
             </div>
 
-            <div
-              style={{
-                ...card,
-                marginBottom: 14,
-                borderColor: "rgba(239,68,68,0.35)",
-                background: T.ddim,
-              }}
-            >
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: T.dng, display: "flex", alignItems: "center", gap: 8 }}>
-                <Trash2 size={16} strokeWidth={2.2} />
-                Delete all expenses
+            {/* ─── Theme Picker ─── */}
+            <div style={{ ...card, marginBottom: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <Palette size={16} color={T.purp} /> Theme
               </div>
-              <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-                Permanently remove every expense in the cloud for{" "}
-                <strong style={{ color: T.txt }}>{profileName.trim() || "this account"}</strong> ({txs.length} now). Your PIN is required.
-                Categories, budgets, and profile settings stay.
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+                {Object.values(THEMES).map((theme) => {
+                  const active = userTheme === theme.id;
+                  return (
+                    <button
+                      key={theme.id}
+                      type="button"
+                      onClick={() => void saveTheme(theme.id)}
+                      style={{
+                        padding: 10,
+                        borderRadius: 12,
+                        border: active ? `2px solid ${T.acc}` : `1px solid ${T.bdr}`,
+                        background: active ? T.adim : T.card2,
+                        cursor: "pointer",
+                        textAlign: "center",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "center", gap: 4, marginBottom: 6 }}>
+                        {theme.preview.map((c, i) => (
+                          <div key={i} style={{ width: 18, height: 18, borderRadius: 6, background: c, border: `1px solid ${c === "#FFFFFF" || c === "#F5F5F7" ? "#D4D6DD" : "transparent"}` }} />
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: active ? 700 : 500, color: active ? T.acc : T.txt }}>{theme.name}</div>
+                    </button>
+                  );
+                })}
               </div>
-              <button
-                type="button"
-                disabled={!firebaseUser?.email || fbStatus !== "ready"}
-                onClick={() => {
-                  setDeleteAllErr("");
-                  setDeleteAllPin("");
-                  setDeleteAllModal(true);
-                }}
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  borderRadius: T.r,
-                  border: `1px solid rgba(239,68,68,0.5)`,
-                  background: "rgba(239,68,68,0.12)",
-                  color: T.dng,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer",
-                  opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.55 : 1,
-                }}
-              >
-                Delete all expenses…
-              </button>
-              {fbStatus !== "ready" ? (
-                <div style={{ fontSize: 11, color: T.mut, marginTop: 8 }}>Connect to the server to use this.</div>
-              ) : null}
             </div>
 
+            {/* ─── Preferences ─── */}
             <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Settings</div>
-              <button
-                type="button"
-                onClick={() => void signOut(auth)}
-                style={{
-                  width: "100%",
-                  marginBottom: 14,
-                  padding: "14px 14px",
-                  borderRadius: T.r,
-                  border: `1px solid ${T.dng}`,
-                  background: T.ddim,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  textAlign: "left",
-                }}
-              >
-                <LogOut size={22} color={T.dng} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: T.dng }}>Log out of app</div>
-                  <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Return to PIN screen</div>
-                </div>
-              </button>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Preferences</div>
               {(() => {
                 const activeCur = CURRENCIES.find((c) => c.code === currencyCode) || CURRENCIES[0];
                 const freqLabel = { daily: "Daily", weekly: "Weekly (Mon)", monthly: "Monthly (1st)" }[reportFreq] || "Weekly";
-                const settingsRows = [
-                  { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null, right: null },
+                const rows = [
                   { Icon: RefreshCw, label: "Currency", sub: `${activeCur.flag} ${activeCur.code} ${activeCur.symbol}`, color: T.acc, onClick: () => setShowCurrencyPicker(true), right: null },
                   {
                     Icon: FileText, label: "Report Frequency", sub: `Auto-generate: ${freqLabel}`, color: T.purp, onClick: null,
                     right: (
-                      <select
-                        value={reportFreq}
-                        onChange={(e) => void saveReportFreq(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}
-                      >
+                      <select value={reportFreq} onChange={(e) => void saveReportFreq(e.target.value)} onClick={(e) => e.stopPropagation()} style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}>
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
                       </select>
                     ),
                   },
-                  { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue, onClick: null, right: null },
-                  { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp, onClick: null, right: null },
+                  { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null, right: null },
                 ];
-                return settingsRows.map((item, i) => (
-                  <div key={i} role={item.onClick ? "button" : undefined} tabIndex={item.onClick ? 0 : undefined} onClick={item.onClick || undefined} onKeyDown={item.onClick ? (e) => { if (e.key === "Enter" || e.key === " ") item.onClick(); } : undefined} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < settingsRows.length - 1 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: `${item.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <item.Icon size={18} color={item.color} strokeWidth={1.8} />
+                return rows.map((item, i) => (
+                  <div key={i} role={item.onClick ? "button" : undefined} tabIndex={item.onClick ? 0 : undefined} onClick={item.onClick || undefined} onKeyDown={item.onClick ? (e) => { if (e.key === "Enter" || e.key === " ") item.onClick(); } : undefined} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < rows.length - 1 ? `1px solid ${T.bdr}` : "none", cursor: item.onClick ? "pointer" : "default" }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: `${item.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <item.Icon size={16} color={item.color} strokeWidth={1.8} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
-                      <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</div>
+                      <div style={{ fontSize: 11, color: T.sub }}>{item.sub}</div>
                     </div>
-                    {item.right || <ChevronRight size={16} color={T.mut} />}
+                    {item.right || (item.onClick ? <ChevronRight size={16} color={T.mut} /> : null)}
                   </div>
                 ));
               })()}
             </div>
 
+            {/* ─── Split Contacts ─── */}
             <div style={{ ...card, marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
-                <Users size={15} /> Split Contacts
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                <Users size={15} color={T.blue} /> Split Contacts
               </div>
-              <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.45, marginBottom: 12 }}>
-                Add people you split bills with. Scan their Profile QR to link their account (name + ID), or type a name only.
+              <div style={{ fontSize: 11, color: T.sub, lineHeight: 1.4, marginBottom: 10 }}>
+                Add people you split bills with. Scan their QR to link accounts.
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {people.map((p) => {
                   const pn = normalizePerson(p);
                   return (
-                    <div
-                      key={personStableKey(pn)}
-                      style={{ display: "flex", alignItems: "center", gap: 6, background: T.card2, borderRadius: 999, padding: "6px 12px", border: `1px solid ${T.bdr}` }}
-                    >
-                      <span style={{ fontSize: 13 }} title={pn.u || pn.e ? "Linked for shared splits" : undefined}>
+                    <div key={personStableKey(pn)} style={{ display: "flex", alignItems: "center", gap: 5, background: T.card2, borderRadius: 999, padding: "5px 10px", border: `1px solid ${T.bdr}` }}>
+                      <span style={{ fontSize: 12 }}>
                         👤 {pn.n}
-                        {pn.u || pn.e ? <span style={{ fontSize: 10, color: T.acc, marginLeft: 4 }}>●</span> : null}
+                        {pn.u || pn.e ? <span style={{ fontSize: 9, color: T.acc, marginLeft: 3 }}>●</span> : null}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => void persistPeople(people.map(normalizePerson).filter((x) => !sameSplitPerson(x, pn)))}
-                        style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}
-                      >
-                        <X size={13} />
+                      <button type="button" onClick={() => void persistPeople(people.map(normalizePerson).filter((x) => !sameSplitPerson(x, pn)))} style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}>
+                        <X size={12} />
                       </button>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 6 }}>
                 <input
                   placeholder="Add person…"
                   value={newP}
                   onChange={(e) => setNewP(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && newP.trim()) {
-                      const name = newP.trim();
-                      void persistPeople([...people.map(normalizePerson), { n: name }]);
-                      setNewP("");
-                    }
-                  }}
-                  style={{ ...inp, flex: 1, minWidth: 140 }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && newP.trim()) { void persistPeople([...people.map(normalizePerson), { n: newP.trim() }]); setNewP(""); } }}
+                  style={{ ...inp, flex: 1, minWidth: 100, padding: "10px 12px", fontSize: 13 }}
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!newP.trim()) return;
-                    const name = newP.trim();
-                    void persistPeople([...people.map(normalizePerson), { n: name }]);
-                    setNewP("");
-                  }}
-                  style={{ padding: "0 18px", borderRadius: T.r, background: T.acc, border: "none", color: "#000", fontWeight: 700, cursor: "pointer" }}
-                >
+                <button type="button" onClick={() => { if (!newP.trim()) return; void persistPeople([...people.map(normalizePerson), { n: newP.trim() }]); setNewP(""); }} style={{ padding: "0 14px", borderRadius: T.r, background: T.acc, border: "none", color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
                   Add
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSplitScan(true)}
-                  style={{
-                    padding: "0 14px",
-                    borderRadius: T.r,
-                    border: `1px solid ${T.acc}`,
-                    background: T.adim,
-                    color: T.acc,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <ScanLine size={16} />
-                  Scan
+                <button type="button" onClick={() => setShowSplitScan(true)} style={{ padding: "0 10px", borderRadius: T.r, border: `1px solid ${T.acc}`, background: T.adim, color: T.acc, fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                  <ScanLine size={14} /> Scan
                 </button>
               </div>
             </div>
 
+            {/* ─── Users on this device ─── */}
+            <div style={{ ...card, marginBottom: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Users on this device</div>
+              <div style={{ fontSize: 11, color: T.sub, marginBottom: 10, lineHeight: 1.4 }}>
+                Switch between saved accounts. Use Sign-in ID to log in on another device.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {deviceProfiles.map((p) => {
+                  const isCurrent = p.email === firebaseUser?.email;
+                  const pinLabel = p.pin && isValidPin(p.pin) ? "••••" : "No PIN";
+                  return (
+                    <div key={p.email} style={{ padding: 10, borderRadius: T.r, border: `1px solid ${isCurrent ? T.acc : T.bdr}`, background: isCurrent ? T.adim : T.card2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{profileDisplayName(p)}</div>
+                        <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>PIN: {pinLabel} {isCurrent ? "· Active" : ""}</div>
+                      </div>
+                      {!isCurrent && (
+                        <button type="button" onClick={() => void switchToDeviceProfile(p)} style={{ flexShrink: 0, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.bdrH}`, background: T.surf, color: T.acc, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          Switch
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ─── Account Actions ─── */}
+            <div style={{ ...card, marginBottom: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Account</div>
+              <button
+                type="button"
+                onClick={() => void signOut(auth)}
+                style={{ width: "100%", marginBottom: 10, padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}`, background: T.ddim, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}
+              >
+                <LogOut size={18} color={T.dng} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.dng }}>Log out</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>Return to PIN screen</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                disabled={!firebaseUser?.email || fbStatus !== "ready"}
+                onClick={() => { setDeleteAllErr(""); setDeleteAllPin(""); setDeleteAllModal(true); }}
+                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid rgba(239,68,68,0.4)`, background: "rgba(239,68,68,0.06)", cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
+              >
+                <Trash2 size={18} color={T.dng} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.dng }}>Delete all expenses</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>{txs.length} transactions · requires PIN</div>
+                </div>
+              </button>
+            </div>
+
             {(footerLine1 || footerLine2) && (
-              <div style={{ textAlign: "center", padding: "10px 0 0" }}>
-                {footerLine1 ? (
-                  <div style={{ fontSize: 13, color: T.mut }}>{footerLine1}</div>
-                ) : null}
-                {footerLine2 ? (
-                  <div style={{ fontSize: 12, color: T.mut, marginTop: 3 }}>{footerLine2}</div>
-                ) : null}
+              <div style={{ textAlign: "center", padding: "6px 0 0" }}>
+                {footerLine1 ? <div style={{ fontSize: 12, color: T.mut }}>{footerLine1}</div> : null}
+                {footerLine2 ? <div style={{ fontSize: 11, color: T.mut, marginTop: 2 }}>{footerLine2}</div> : null}
               </div>
             )}
           </div>

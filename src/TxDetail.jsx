@@ -266,7 +266,7 @@ export function TxDetail({
                 step="0.01"
                 value={editDraft.amount}
                 onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))}
-                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 15 }}
+                style={{ ...inp, width: "100%", padding: "10px 12px" }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -275,7 +275,7 @@ export function TxDetail({
                 type="date"
                 value={editDraft.date}
                 onChange={(e) => setEditDraft((d) => ({ ...d, date: e.target.value }))}
-                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+                style={{ ...inp, width: "100%", padding: "10px 12px" }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -283,7 +283,7 @@ export function TxDetail({
               <select
                 value={editDraft.category}
                 onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value }))}
-                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+                style={{ ...inp, width: "100%", padding: "10px 12px" }}
               >
                 <option value="">—</option>
                 {(categories || []).map((c) => (
@@ -296,7 +296,7 @@ export function TxDetail({
               <select
                 value={editDraft.payment}
                 onChange={(e) => setEditDraft((d) => ({ ...d, payment: e.target.value }))}
-                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+                style={{ ...inp, width: "100%", padding: "10px 12px" }}
               >
                 {(payments || []).map((p) => (
                   <option key={p} value={p}>{p}</option>
@@ -310,7 +310,7 @@ export function TxDetail({
                 value={editDraft.notes}
                 onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
                 placeholder="Merchant or description"
-                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+                style={{ ...inp, width: "100%", padding: "10px 12px" }}
               />
             </div>
             <div style={{ display: "flex", gap: 10 }}>
@@ -567,7 +567,7 @@ export function TxDetail({
                                   prev.map((x, j) => (j === i ? { ...x, a: e.target.value } : x))
                                 )
                               }
-                              style={{ ...inp, flex: 1, padding: "8px 10px", fontSize: 13 }}
+                              style={{ ...inp, flex: 1, padding: "8px 10px" }}
                             />
                           </div>
                         ))}

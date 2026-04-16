@@ -447,7 +447,7 @@ export default function AuthGate() {
             value={remoteEmail}
             onChange={(e) => setRemoteEmail(e.target.value)}
             placeholder="u_…@pin.track.app"
-            style={{ ...inp, marginBottom: 14, fontSize: 14, fontFamily: "ui-monospace,monospace" }}
+            style={{ ...inp, marginBottom: 14, fontFamily: "ui-monospace,monospace" }}
           />
           <label style={lbl}>4-digit PIN</label>
           <input

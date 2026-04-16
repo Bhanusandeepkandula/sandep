@@ -31,7 +31,7 @@ export const inp = {
   border: `1px solid ${T.bdr}`,
   borderRadius: T.r,
   color: T.txt,
-  fontSize: 14,
+  fontSize: 16,
   outline: "none",
   boxSizing: "border-box",
 };

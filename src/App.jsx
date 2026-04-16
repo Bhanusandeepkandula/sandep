@@ -77,6 +77,7 @@ import { extractTextFromFile, fileToDataUrl } from "./docExtract.js";
 import { TxDetail } from "./TxDetail.jsx";
 import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
+import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -139,7 +140,7 @@ function ExternalLlmCsvPromptPanel({ prompt, onCopy, disabled, blurb }) {
             ...inp,
             width: "100%",
             fontFamily: "ui-monospace, monospace",
-            fontSize: 10,
+            fontSize: 16,
             lineHeight: 1.35,
             resize: "vertical",
             minHeight: 200,
@@ -157,7 +158,7 @@ function sanitizeForFirestore(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-export default function App() {
+export default function App({ onReady }) {
   const [tab, setTab] = useState("home");
   const [txs, setTxs] = useState([]);
   const [budgets, setBudgets] = useState({});
@@ -340,9 +341,10 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setAuthChecked(true);
+      if (typeof onReady === "function") onReady();
     });
     return () => unsub();
-  }, []);
+  }, [onReady]);
 
   useEffect(() => {
     let active = true;
@@ -1868,18 +1870,14 @@ export default function App() {
           alignSelf: "center",
           minHeight: 0,
           height: "100%",
-          paddingLeft: px,
-          paddingRight: px,
           boxSizing: "border-box",
           background: T.bg,
           color: T.txt,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          overflowY: "auto",
           fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
         }}
       >
-        <div style={{ color: T.sub, fontSize: 14 }}>Loading…</div>
+        <HomeSkeleton px={px} />
       </div>
     );
   }
@@ -2020,7 +2018,10 @@ export default function App() {
           overscrollBehavior: "contain",
         }}
       >
-        {tab === "home" && (
+        {tab === "home" && fbStatus === "loading" && txs.length === 0 && (
+          <HomeSkeleton px={px} />
+        )}
+        {tab === "home" && !(fbStatus === "loading" && txs.length === 0) && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -2802,7 +2803,6 @@ export default function App() {
                     resize: "vertical",
                     minHeight: 120,
                     fontFamily: "ui-monospace, monospace",
-                    fontSize: 12,
                     lineHeight: 1.4,
                     marginBottom: 12,
                   }}
@@ -2925,7 +2925,6 @@ export default function App() {
                         ...inp,
                         width: "100%",
                         fontFamily: "ui-monospace, monospace",
-                        fontSize: 12,
                         lineHeight: 1.4,
                         marginBottom: 12,
                       }}
@@ -3044,7 +3043,7 @@ export default function App() {
                         if (isEditing && editImportDraft) {
                           const cats = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
                           const pays = (catalogRef.current.payments || []).filter(Boolean);
-                          const cellInput = { background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 4, color: T.txt, padding: "4px 6px", fontSize: 12, width: "100%" };
+                          const cellInput = { background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 4, color: T.txt, padding: "4px 6px", fontSize: 16, width: "100%" };
                           return (
                             <tr key={r.line} style={{ borderTop: `1px solid ${T.acc}`, background: "rgba(0,255,100,0.04)" }}>
                               <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
@@ -3512,7 +3511,7 @@ export default function App() {
                                 placeholder="₹ amount"
                                 value={p.a}
                                 onChange={(e) => setSplitPpl((prev) => prev.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))}
-                                style={{ ...inp, flex: 1, padding: "8px 10px", fontSize: 13 }}
+                                style={{ ...inp, flex: 1, padding: "8px 10px" }}
                               />
                             </div>
                           ))}
@@ -3567,7 +3566,10 @@ export default function App() {
           </div>
         )}
 
-        {tab === "analytics" && (
+        {tab === "analytics" && fbStatus === "loading" && txs.length === 0 && (
+          <AnalyticsSkeleton px={px} />
+        )}
+        {tab === "analytics" && !(fbStatus === "loading" && txs.length === 0) && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
               <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 14 }}>Analytics</div>
@@ -3843,7 +3845,10 @@ export default function App() {
           </div>
         )}
 
-        {tab === "budgets" && (
+        {tab === "budgets" && fbStatus === "loading" && txs.length === 0 && (
+          <BudgetsSkeleton px={px} />
+        )}
+        {tab === "budgets" && !(fbStatus === "loading" && txs.length === 0) && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px` }}>
               <div

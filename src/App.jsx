@@ -306,6 +306,7 @@ export default function App({ onReady }) {
 
   const [showBM, setShowBM] = useState(false);
   const [budgetSubTab, setBudgetSubTab] = useState("budgets");
+  const [reportSubTab, setReportSubTab] = useState("spending");
   const [bmCat, setBmCat] = useState("");
   const [bmAmt, setBmAmt] = useState("");
   /** Overall monthly spending cap (optional, no category). Synced as `monthlyBudgetTotal` in Firestore. */
@@ -3958,30 +3959,62 @@ export default function App({ onReady }) {
         {/* ═══════════════════ REPORTS TAB ═══════════════════ */}
         {tab === "reports" && (
           <div>
-            <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
-              <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 4 }}>AI Reports</div>
-              <div style={{ fontSize: 13, color: T.sub, marginBottom: 14 }}>Spending analysis, trends & smart insights</div>
+            <div style={{ padding: `${px + 8}px ${px}px 0` }}>
+              <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 12 }}>AI Reports</div>
+              <div style={{ display: "flex", gap: 4, background: T.card2, borderRadius: 12, padding: 4, marginBottom: 14 }}>
+                {[
+                  { id: "spending", label: "Spending Report", Icon: BarChart2 },
+                  { id: "insights", label: "AI Insights", Icon: Sparkles },
+                ].map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setReportSubTab(st.id)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 8px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: reportSubTab === st.id ? T.card : "transparent",
+                      color: reportSubTab === st.id ? T.txt : T.sub,
+                      fontSize: 13,
+                      fontWeight: reportSubTab === st.id ? 700 : 500,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      transition: "all .15s",
+                    }}
+                  >
+                    <st.Icon size={14} color={reportSubTab === st.id ? (st.id === "insights" ? T.purp : T.acc) : T.sub} />
+                    {st.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <SpendingReport
-              txs={txs}
-              categories={categories}
-              formatMoney={formatMoney}
-              currencyCode={currencyCode}
-              budgets={budgets}
-              catSpent={catSpent}
-              fixedTotal={fixedTotal}
-              monthlyBudgetTotal={monthlyBudgetTotal}
-              uid={uidRef.current}
-              reportFreq={reportFreq}
-              px={px}
-            />
+            {reportSubTab === "spending" && (
+              <SpendingReport
+                txs={txs}
+                categories={categories}
+                formatMoney={formatMoney}
+                currencyCode={currencyCode}
+                budgets={budgets}
+                catSpent={catSpent}
+                fixedTotal={fixedTotal}
+                monthlyBudgetTotal={monthlyBudgetTotal}
+                uid={uidRef.current}
+                reportFreq={reportFreq}
+                px={px}
+              />
+            )}
 
-            <div style={{ padding: `0 ${px}px 16px` }}>
-              <div style={{ ...card, marginBottom: 14 }}>
+            {reportSubTab === "insights" && (
+              <div style={{ padding: `0 ${px}px 16px` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
-                    <Sparkles size={17} color={T.purp} /> AI Insights
+                  <div style={{ fontSize: 13, color: T.sub }}>
+                    {tips.length > 0 ? <><strong style={{ color: T.txt }}>{tips.length}</strong> personalised tips</> : "Get AI-powered spending advice"}
                   </div>
                   <button
                     type="button"
@@ -4007,35 +4040,33 @@ export default function App({ onReady }) {
                 </div>
 
                 {tips.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {tips.map((tip, i) => (
-                      <div key={i} style={{ background: T.card2, borderRadius: 12, padding: 14, borderLeft: `3px solid ${tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc}` }}>
-                        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                          <div style={{ fontSize: 26 }}>{tip.icon}</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{tip.title}</div>
-                            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>{tip.desc}</div>
-                            <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
-                              <span style={{ fontSize: 11, background: T.adim, color: T.acc, borderRadius: 6, padding: "2px 8px" }}>Save {tip.saving}</span>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  borderRadius: 6,
-                                  padding: "2px 8px",
-                                  background: tip.priority === "high" ? T.ddim : tip.priority === "medium" ? T.wdim : T.adim,
-                                  color: tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc,
-                                }}
-                              >
-                                {tip.priority} priority
-                              </span>
-                            </div>
+                  tips.map((tip, i) => (
+                    <div key={i} style={{ ...card, marginBottom: 10, borderLeft: `3px solid ${tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc}` }}>
+                      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                        <div style={{ fontSize: 26 }}>{tip.icon}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{tip.title}</div>
+                          <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>{tip.desc}</div>
+                          <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 11, background: T.adim, color: T.acc, borderRadius: 6, padding: "2px 8px" }}>Save {tip.saving}</span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                borderRadius: 6,
+                                padding: "2px 8px",
+                                background: tip.priority === "high" ? T.ddim : tip.priority === "medium" ? T.wdim : T.adim,
+                                color: tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc,
+                              }}
+                            >
+                              {tip.priority} priority
+                            </span>
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))
                 ) : (
-                  <div style={{ textAlign: "center", padding: "20px 0 10px" }}>
+                  <div style={{ ...card, textAlign: "center", padding: 32 }}>
                     <div style={{ width: 52, height: 52, borderRadius: 16, background: T.pdim, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
                       <BrainCircuit size={24} color={T.purp} />
                     </div>
@@ -4046,7 +4077,7 @@ export default function App({ onReady }) {
                   </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
         )}
 

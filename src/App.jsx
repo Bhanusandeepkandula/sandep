@@ -90,6 +90,7 @@ import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBone
 import { CategoryIcon } from "./categoryIcons.jsx";
 import { SpendingReport } from "./SpendingReport.jsx";
 import { useDialog } from "./AppDialogs.jsx";
+import { PullToRefresh } from "./PullToRefresh.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -271,6 +272,9 @@ export default function App({ onReady }) {
   /** Last uploaded image on OCR→CSV (for vision fallback when local OCR → CSV is weak). */
   const ocrCsvImageDataUrlRef = useRef(null);
   const mainScrollRef = useRef(null);
+  const handlePullRefresh = useCallback(async () => {
+    dlg.toast("Refreshed", { type: "success", duration: 1500 });
+  }, [dlg]);
   /** Paste OCR / bill text → OpenAI → import-ready CSV (dev: Vite /api/convert). */
   const [ocrCsvText, setOcrCsvText] = useState("");
   const [ocrCsvOut, setOcrCsvOut] = useState("");
@@ -2202,6 +2206,7 @@ export default function App({ onReady }) {
         </div>
       )}
 
+      <PullToRefresh scrollRef={mainScrollRef} onRefresh={handlePullRefresh} />
       <div
         ref={mainScrollRef}
         style={{
@@ -5180,8 +5185,6 @@ export default function App({ onReady }) {
           </div>
         </div>
       ) : null}
-
-      {/* Toasts handled by DialogProvider */}
 
       <div
         style={{

@@ -1039,48 +1039,103 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
   }
 
   async function genTips() {
+    const openAiKey = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+    if (!openAiKey) {
+      console.error("VITE_OPENAI_API_KEY not set");
+      return;
+    }
     setLdTips(true);
+
+    // Payment method breakdown for this month
+    const payBreakdown = {};
+    monthTxs.forEach((t) => {
+      payBreakdown[t.payment] = (payBreakdown[t.payment] || 0) + t.amount;
+    });
+
+    // Last 7 days total
+    const last7 = txs
+      .filter((t) => {
+        const d = new Date(t.date + "T00:00:00");
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 7);
+        return d >= cutoff;
+      })
+      .reduce((s, t) => s + t.amount, 0);
+
+    // Budget status per category
+    const budgetStatus = Object.entries(budgets).map(([cat, limit]) => ({
+      cat,
+      limit,
+      spent: catSpent[cat] || 0,
+      pct: Math.round(((catSpent[cat] || 0) / limit) * 100),
+    }));
+
+    // Top 10 individual transactions this month
+    const topTx = [...monthTxs]
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10)
+      .map((t) => ({ amount: t.amount, cat: t.category, notes: t.notes, date: t.date }));
+
+    const currency = currencyCode || "INR";
     const summary = {
+      currency,
+      period: "current month",
       monthTotal,
       weekTotal,
-      cats: Object.fromEntries(Object.entries(catSpent).sort(([, a], [, b]) => b - a).slice(0, 6)),
-      overBudget: Object.entries(budgets)
-        .filter(([c, l]) => (catSpent[c] || 0) > l)
-        .map(([c]) => c),
-      topTx: txs.slice(0, 5).map((t) => ({ amount: t.amount, cat: t.category, notes: t.notes })),
+      last7DaysTotal: last7,
+      totalTransactions: monthTxs.length,
+      categorySpending: Object.fromEntries(
+        Object.entries(catSpent).sort(([, a], [, b]) => b - a)
+      ),
+      paymentMethods: payBreakdown,
+      budgetStatus,
+      overBudgetCategories: budgetStatus.filter((b) => b.pct > 100).map((b) => b.cat),
+      nearLimitCategories: budgetStatus.filter((b) => b.pct >= 80 && b.pct <= 100).map((b) => b.cat),
+      top10Transactions: topTx,
     };
+
     try {
-      const r = await fetch(API, {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openAiKey}`,
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system:
-            "You are a personal finance advisor. Return ONLY a JSON array of exactly 5 tips. Each: {icon:single emoji,title:string(max 8 words),desc:string(max 20 words),category:string,saving:string(e.g. '₹500/month'),priority:'high'|'medium'|'low'}",
-          messages: [{ role: "user", content: `Give 5 actionable expense tips: ${JSON.stringify(summary)}` }],
+          model: "gpt-4o-mini",
+          temperature: 0.7,
+          max_tokens: 1200,
+          messages: [
+            {
+              role: "system",
+              content:
+                `You are a personal finance advisor. Analyse the user's REAL spending data and return ONLY a JSON array of exactly 5 personalised insights. ` +
+                `Each insight must reference actual numbers from the data. ` +
+                `Format: [{icon:string(single emoji),title:string(max 8 words),desc:string(1-2 sentences, mention real amounts in ${currency}),saving:string(estimated saving e.g. "${currency} 500/month"),priority:"high"|"medium"|"low"}]` +
+                `. Return ONLY the JSON array — no markdown, no explanation.`,
+            },
+            {
+              role: "user",
+              content: `My expense data:\n${JSON.stringify(summary, null, 2)}`,
+            },
+          ],
         }),
       });
-      const bodyText = await r.text();
-      let d = {};
-      try {
-        d = JSON.parse(bodyText);
-      } catch {
-        /* ignore */
-      }
+
+      const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        console.error("genTips API error", d.error?.message || bodyText.slice(0, 200) || r.status);
+        console.error("genTips error", d?.error?.message || r.status);
         setTips([]);
         return;
       }
-      const txt = d.content?.find((c) => c.type === "text")?.text || "[]";
-      let p = [];
+      const raw = String(d?.choices?.[0]?.message?.content || "[]").trim();
+      let parsed = [];
       try {
-        p = JSON.parse(txt.replace(/```json?|```/g, "").trim());
+        parsed = JSON.parse(raw.replace(/^```json?\s*/i, "").replace(/\s*```$/i, "").trim());
       } catch {
         /* ignore */
       }
-      setTips(Array.isArray(p) ? p : []);
+      setTips(Array.isArray(parsed) ? parsed : []);
     } catch (err) {
       console.error(err);
     } finally {

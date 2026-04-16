@@ -357,6 +357,9 @@ export default function App({ onReady }) {
   const peerSettlementsRef = useRef({});
   /** Tracks last-known `settlement` field on mirror txs so the slave gets notified when the master records (or clears) a payment on their behalf. */
   const mirrorSettlementRef = useRef({});
+  /** Pending cross-user settlement writes that the slave couldn't push to the master yet (rules not deployed, offline, etc.). Retried on mount / focus / online / every new save. */
+  const pendingPeerWritesRef = useRef([]);
+  const pendingRetryTimerRef = useRef(null);
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -1066,11 +1069,145 @@ export default function App({ onReady }) {
   }
 
   /**
+   * Cross-user settlement writes are the one path where Firestore rules can
+   * silently reject us (slave pushing to master). To make the propagation
+   * look fully automatic to the user we persist every failed push in a tiny
+   * queue (localStorage + in-memory) and keep retrying on:
+   *   - every subsequent save / clear
+   *   - app mount
+   *   - `online` event
+   *   - window focus
+   *   - a 30s interval while the queue is non-empty
+   * Once the payer's rules land, everything self-heals without any manual
+   * action from either user.
+   */
+  function pendingQueueKey() {
+    return uidRef.current ? `pendingPeerWrites:${uidRef.current}` : null;
+  }
+  function loadPendingQueue() {
+    const k = pendingQueueKey();
+    if (!k) return [];
+    try {
+      const raw = localStorage.getItem(k);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  function savePendingQueue(q) {
+    const k = pendingQueueKey();
+    if (!k) return;
+    try {
+      if (q.length === 0) localStorage.removeItem(k);
+      else localStorage.setItem(k, JSON.stringify(q));
+    } catch {
+      /* ignore */
+    }
+  }
+  function enqueuePendingPeerWrite(item) {
+    /* De-dupe so we don't pile up stale copies for the same target slot —
+     * only the most recent intent matters. */
+    const filtered = pendingPeerWritesRef.current.filter(
+      (p) => !(p.txId === item.txId && p.masterUid === item.masterUid && p.op === item.op)
+    );
+    const next = [...filtered, { ...item, queuedAt: Date.now() }];
+    pendingPeerWritesRef.current = next;
+    savePendingQueue(next);
+    schedulePendingRetry();
+  }
+  function schedulePendingRetry() {
+    if (pendingRetryTimerRef.current) return;
+    if (pendingPeerWritesRef.current.length === 0) return;
+    pendingRetryTimerRef.current = setTimeout(() => {
+      pendingRetryTimerRef.current = null;
+      void flushPendingPeerWrites();
+    }, 30_000);
+  }
+  async function flushPendingPeerWrites() {
+    if (!uidRef.current) return;
+    if (pendingPeerWritesRef.current.length === 0) {
+      pendingPeerWritesRef.current = loadPendingQueue();
+      if (pendingPeerWritesRef.current.length === 0) return;
+    }
+    const queue = [...pendingPeerWritesRef.current];
+    const remaining = [];
+    let landed = 0;
+    for (const item of queue) {
+      try {
+        if (item.op === "set" && item.masterUid && item.entry) {
+          await setDoc(
+            doc(db, "users", item.masterUid, "transactions", item.txId),
+            { settlements: { [uidRef.current]: sanitizeForFirestore(item.entry) } },
+            { merge: true }
+          );
+          landed += 1;
+        } else if (item.op === "clear" && item.masterUid) {
+          await updateDoc(
+            doc(db, "users", item.masterUid, "transactions", item.txId),
+            { [`settlements.${uidRef.current}`]: deleteField() }
+          );
+          landed += 1;
+        } else {
+          /* Unknown op — drop so it doesn't clog the queue forever. */
+        }
+      } catch (err) {
+        const msg = String(err?.message || "");
+        const permDenied = err?.code === "permission-denied" || msg.includes("insufficient permissions");
+        const tooOld = Date.now() - (item.queuedAt || 0) > 14 * 24 * 60 * 60 * 1000; // drop after 14 days
+        if (!tooOld) {
+          remaining.push(item);
+        } else {
+          console.warn("Dropping stale pending peer write:", item, err);
+        }
+        if (!permDenied) {
+          /* Network / transient error — keep the rest of the queue for next
+           * retry instead of hammering. */
+          remaining.push(...queue.slice(queue.indexOf(item) + 1));
+          break;
+        }
+      }
+    }
+    pendingPeerWritesRef.current = remaining;
+    savePendingQueue(remaining);
+    if (landed > 0) {
+      notifyOp(
+        landed === 1 ? "Settlement synced to payer" : `${landed} settlements synced to payer`,
+        "They now see your payment reflected on their side.",
+        { type: "success", tag: "settle-backfill", duration: 3500 }
+      );
+    }
+    if (remaining.length > 0) {
+      schedulePendingRetry();
+    }
+  }
+
+  /* Retry the queue on mount, whenever the network returns, when the app
+   * tab regains focus, and whenever a user signs in. */
+  useEffect(() => {
+    if (!firebaseUser?.uid) return;
+    pendingPeerWritesRef.current = loadPendingQueue();
+    void flushPendingPeerWrites();
+    const onOnline = () => void flushPendingPeerWrites();
+    const onFocus = () => void flushPendingPeerWrites();
+    window.addEventListener("online", onOnline);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", onFocus);
+      if (pendingRetryTimerRef.current) {
+        clearTimeout(pendingRetryTimerRef.current);
+        pendingRetryTimerRef.current = null;
+      }
+    };
+  }, [firebaseUser?.uid]);
+
+  /**
    * Slave records a settlement against their mirror copy AND pushes it to the master's
    * original transaction under `settlements[slaveUid]` so the master's spending drops by
    * the paid-back amount automatically. Both writes go through in parallel — if the
    * master-side write fails (e.g. rules not yet deployed), the slave's local ledger still
-   * updates correctly.
+   * updates correctly AND the write is queued for automatic retry.
    */
   async function saveSettlement(txId, settlement) {
     if (!txId || !settlement) return;
@@ -1095,6 +1232,9 @@ export default function App({ onReady }) {
             byUid: uidRef.current,
             byName: profileName || "",
           };
+          /* Try to flush any older queued writes first so they don't get
+           * stuck behind this new one. */
+          void flushPendingPeerWrites();
           try {
             await setDoc(
               doc(db, "users", masterUid, "transactions", txId),
@@ -1102,14 +1242,15 @@ export default function App({ onReady }) {
               { merge: true }
             );
           } catch (masterErr) {
-            console.warn("saveSettlement: master push failed (rules?):", masterErr);
+            console.warn("saveSettlement: master push failed, queueing for auto-retry:", masterErr);
+            enqueuePendingPeerWrite({ op: "set", txId, masterUid, entry });
             if (
               masterErr?.code === "permission-denied" ||
               String(masterErr?.message || "").includes("insufficient permissions")
             ) {
               dlg.toast(
-                "Your settlement is saved, but the payer won't see it until Firestore rules are updated.",
-                { type: "warn", duration: 7000, title: "Rules need updating" }
+                "Saved locally. We'll push it to the payer automatically as soon as their permissions allow.",
+                { type: "warn", duration: 6000, title: "Syncing in background" }
               );
             }
           }
@@ -1163,20 +1304,22 @@ export default function App({ onReady }) {
       }
 
       if (masterUid) {
+        void flushPendingPeerWrites();
         try {
           await updateDoc(
             doc(db, "users", masterUid, "transactions", txId),
             { [`settlements.${uidRef.current}`]: deleteField() }
           );
         } catch (masterErr) {
-          console.warn("clearSettlement: master settlement removal failed:", masterErr);
+          console.warn("clearSettlement: master settlement removal failed, queueing for auto-retry:", masterErr);
+          enqueuePendingPeerWrite({ op: "clear", txId, masterUid });
           if (
             masterErr?.code === "permission-denied" ||
             String(masterErr?.message || "").includes("insufficient permissions")
           ) {
             dlg.toast(
-              "Settlement cleared on your side, but the payer still sees it until Firestore rules are updated.",
-              { type: "warn", duration: 7000, title: "Rules need updating" }
+              "Cleared on your side. We'll sync the removal to the payer automatically in the background.",
+              { type: "warn", duration: 6000, title: "Syncing in background" }
             );
           }
         }

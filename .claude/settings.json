@@ -8,7 +8,10 @@
       "Bash(git pull *)",
       "Bash(curl -s \"https://raw.githubusercontent.com/NanoNets/docstrange/main/package.json\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/NanoNets/docstrange/refs/heads/main/README.md\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(firebase deploy *)",
+      "Bash(npx firebase-tools *)",
+      "Bash(npx firebase-tools@latest login --no-localhost)"
     ]
   }
 }

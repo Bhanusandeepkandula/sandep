@@ -1,10 +1,21 @@
 import { Trash2, ImageIcon } from "lucide-react";
 import { T } from "./config.js";
-import { getCat, fDate } from "./utils.js";
+import { getCat, fDate, effectiveAmount } from "./utils.js";
 import { CategoryIcon } from "./categoryIcons.jsx";
 
-export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLocale }) {
+export function TxRow({
+  tx,
+  onDelete,
+  onSelect,
+  categories,
+  formatMoney,
+  dateLocale,
+  selfProfileUuid = "",
+}) {
   const cat = getCat(categories, tx.category);
+  const isMirror =
+    typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim().length > 0;
+  const displayAmt = effectiveAmount(tx, selfProfileUuid);
   return (
     <div
       style={{
@@ -88,13 +99,15 @@ export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLoc
             <span>{fDate(tx.date, dateLocale)}</span>
             <span>·</span>
             <span>{tx.payment}</span>
-            {tx.syncedFromUid ? (
+            {isMirror ? (
               <>
                 <span>·</span>
-                <span style={{ color: T.blue }} title="Synced from a split contact">Synced</span>
+                <span style={{ color: T.blue }} title="Your share of a split from a contact">
+                  Your share
+                </span>
               </>
             ) : null}
-            {tx.split && (
+            {tx.split && !isMirror && (
               <>
                 <span>·</span>
                 <span style={{ color: T.acc }}>Split</span>
@@ -105,7 +118,9 @@ export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLoc
 
         {/* amount + category badge */}
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: T.txt }}>-{formatMoney(tx.amount)}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: T.txt }}>
+            -{formatMoney(displayAmt)}
+          </div>
           <div
             style={{
               fontSize: 11,
@@ -121,29 +136,32 @@ export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLoc
         </div>
       </div>
 
-      {/* delete button — separate from the clickable row area */}
-      <button
-        type="button"
-        onClick={() => onDelete(tx.id)}
-        title="Delete"
-        style={{
-          background: "none",
-          border: "none",
-          color: T.dng,
-          cursor: "pointer",
-          padding: 6,
-          flexShrink: 0,
-          opacity: 0.6,
-          borderRadius: 8,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
-      >
-        <Trash2 size={15} />
-      </button>
+      {/* delete button — owner only. Slaves can't delete mirror copies from the home screen;
+          the master-side delete will remove this mirror for them automatically. */}
+      {!isMirror && (
+        <button
+          type="button"
+          onClick={() => onDelete(tx.id)}
+          title="Delete"
+          style={{
+            background: "none",
+            border: "none",
+            color: T.dng,
+            cursor: "pointer",
+            padding: 6,
+            flexShrink: 0,
+            opacity: 0.6,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
+        >
+          <Trash2 size={15} />
+        </button>
+      )}
     </div>
   );
 }

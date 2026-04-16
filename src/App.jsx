@@ -45,7 +45,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import ReactCountryFlag from "react-country-flag";
 import { T, card, card2, inp, lbl, pill, THEMES, applyTheme } from "./config.js";
-import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
+import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot, effectiveAmount } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
 import {
@@ -351,6 +351,8 @@ export default function App({ onReady }) {
   const notifiedMirrorIdsRef = useRef(new Set());
   /** Tracks last-known amount for each mirror so we can notify on master edits. */
   const mirrorAmountRef = useRef({});
+  /** Tracks last-known metadata for each mirror (category/notes) so deletion notifications can name the bill. */
+  const mirrorMetaRef = useRef({});
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -502,6 +504,7 @@ export default function App({ onReady }) {
       seenTxIdsRef.current = null;
       notifiedMirrorIdsRef.current = new Set();
       mirrorAmountRef.current = {};
+      mirrorMetaRef.current = {};
       if (authChecked) {
         setFbStatus("auth");
         setFbErrorDetail("");
@@ -681,13 +684,54 @@ export default function App({ onReady }) {
                 } catch { /* ignore */ }
               }
               mirrorAmountRef.current[tx.id] = curAmt;
+              mirrorMetaRef.current[tx.id] = {
+                category: tx.category || "",
+                notes: tx.notes || "",
+                amount: curAmt,
+              };
+            }
+
+            /* Mirror deletion detection — if a tx id we knew about is gone AND it was a
+             * mirror, the master deleted the bill on their side. Surface a toast + native
+             * notification so the slave isn't surprised by disappearing rows. */
+            const currentIds = new Set(rows.map((r) => r.id));
+            for (const oldId of prevSeen) {
+              if (currentIds.has(oldId)) continue;
+              const meta = mirrorMetaRef.current[oldId];
+              if (!meta) continue; // not a mirror we tracked
+              const merchant = (meta.notes && meta.notes.trim()) || meta.category || "Expense";
+              const body = `${merchant} · ${formatMoneyRef.current(meta.amount || 0)} removed by the payer`;
+              dlg.toast(body, {
+                type: "warn",
+                title: "Split removed",
+                duration: 5000,
+              });
+              try {
+                if ("Notification" in window && Notification.permission === "granted") {
+                  const n = new Notification("Split removed", { body, tag: `split-del-${oldId}`, icon: "/favicon.ico" });
+                  n.onclick = () => { try { window.focus(); } catch { /* ignore */ } };
+                }
+              } catch { /* ignore */ }
+              try {
+                if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate([80, 40, 80]);
+              } catch { /* ignore */ }
+              delete mirrorAmountRef.current[oldId];
+              delete mirrorMetaRef.current[oldId];
+              notifiedMirrorIdsRef.current.delete(oldId);
             }
           }
           // Seed amounts for all mirrors on first load (no notification, just baseline)
           if (prevSeen === null) {
             for (const tx of rows) {
               const isMirror = typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== uidRef.current;
-              if (isMirror) mirrorAmountRef.current[tx.id] = Number(tx.amount) || 0;
+              if (isMirror) {
+                mirrorAmountRef.current[tx.id] = Number(tx.amount) || 0;
+                mirrorMetaRef.current[tx.id] = {
+                  category: tx.category || "",
+                  notes: tx.notes || "",
+                  amount: Number(tx.amount) || 0,
+                };
+              }
             }
           }
           seenTxIdsRef.current = new Set(rows.map((r) => r.id));
@@ -904,9 +948,15 @@ export default function App({ onReady }) {
           sanitizeForFirestore({ settlement }),
           { merge: true }
         );
+        const amt = Number(settlement.amount) || 0;
+        notifyOp(
+          settlement.full ? "Fully settled" : "Partial settlement saved",
+          `${formatMoney(amt)} · ${settlement.method || "payment"}`,
+          { type: "success", tag: `settle-${txId}`, duration: 3500 }
+        );
       } catch (e) {
         console.error("saveSettlement failed:", e);
-        dlg.toast("Could not save settlement. Try again.", { type: "error" });
+        notifyOp("Couldn't save settlement", "Check your connection and try again.", { type: "error", duration: 5000 });
       }
     }
   }
@@ -914,23 +964,61 @@ export default function App({ onReady }) {
   async function editTransaction(txId, updates) {
     if (!txId || !updates || typeof updates !== "object") return;
     const prevTx = txs.find((t) => t.id === txId);
-    setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, ...updates } : t)));
-    setSelectedTx((st) => (st && st.id === txId ? { ...st, ...updates } : st));
+
+    /* If the amount changed and a split is attached, keep the split in sync:
+     *   - equal splits: divide evenly across everyone (owner + people)
+     *   - custom splits: scale each person's share by the amount ratio
+     * Without this, edits to the total leave stale per-person amounts that no
+     * longer add up correctly — and mirrors push those stale numbers to slaves. */
+    let finalUpdates = { ...updates };
+    if (prevTx?.split?.people?.length && typeof updates.amount === "number" && Number.isFinite(updates.amount)) {
+      const prevAmt = Number(prevTx.amount) || 0;
+      const newAmt = updates.amount;
+      if (newAmt !== prevAmt) {
+        const type = prevTx.split.type === "custom" ? "custom" : "equal";
+        const ppl = prevTx.split.people;
+        let rebuilt;
+        if (type === "equal" && newAmt > 0) {
+          const each = Math.round((newAmt / (ppl.length + 1)) * 100) / 100;
+          rebuilt = ppl.map((p) => ({ ...p, a: each }));
+        } else if (type === "custom" && prevAmt > 0) {
+          const ratio = newAmt / prevAmt;
+          rebuilt = ppl.map((p) => {
+            const raw = typeof p.a === "number" ? p.a : parseFloat(String(p.a)) || 0;
+            return { ...p, a: Math.round(raw * ratio * 100) / 100 };
+          });
+        } else {
+          rebuilt = ppl.map((p) => ({ ...p, a: 0 }));
+        }
+        finalUpdates = { ...finalUpdates, split: { ...prevTx.split, type, people: rebuilt } };
+      }
+    }
+
+    setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, ...finalUpdates } : t)));
+    setSelectedTx((st) => (st && st.id === txId ? { ...st, ...finalUpdates } : st));
     if (uidRef.current) {
       try {
         const ref = doc(db, "users", uidRef.current, "transactions", txId);
-        await setDoc(ref, sanitizeForFirestore(updates), { merge: true });
+        await setDoc(ref, sanitizeForFirestore(finalUpdates), { merge: true });
         // Master: push edits to all mirror copies so slaves see changes in real-time
         const isMaster = !prevTx?.syncedFromUid || prevTx.syncedFromUid === uidRef.current;
-        const merged = prevTx ? { ...prevTx, ...updates } : null;
+        const merged = prevTx ? { ...prevTx, ...finalUpdates } : null;
         if (isMaster && merged?.split?.people?.length) {
           const enrichedSplit = enrichSplitPeopleFromContacts(merged.split, people);
           upsertSplitMirrors(db, uidRef.current, { ...merged, split: enrichedSplit }).catch((e) =>
             console.error("editTransaction: mirror push failed:", e)
           );
         }
+        const desc = merged
+          ? `${formatMoney(Number(merged.amount) || 0)} · ${merged.category || "Expense"}`
+          : "Changes saved";
+        notifyOp("Transaction updated", desc, {
+          type: "success",
+          tag: `tx-edit-${txId}`,
+        });
       } catch (e) {
         console.error("Failed to save edit:", e);
+        notifyOp("Couldn't save edit", "Check your connection and try again.", { type: "error", duration: 5000 });
       }
     }
   }
@@ -1056,13 +1144,13 @@ export default function App({ onReady }) {
   }, [tab, step, categories, form.category, scanMissingFieldKeys]);
 
   const filtered = useMemo(() => filterTx(txs, df, cS, cE), [txs, df, cS, cE]);
-  const fTotal = useMemo(() => tot(filtered), [filtered]);
+  const fTotal = useMemo(() => tot(filtered, profileTagUuid), [filtered, profileTagUuid]);
   const monthTxs = useMemo(() => filterTx(txs, "month"), [txs]);
-  const monthTotal = useMemo(() => tot(monthTxs), [monthTxs]);
+  const monthTotal = useMemo(() => tot(monthTxs, profileTagUuid), [monthTxs, profileTagUuid]);
   const todayTxs = useMemo(() => txs.filter((t) => t.date === tdStr()), [txs]);
-  const todayTotal = useMemo(() => tot(todayTxs), [todayTxs]);
+  const todayTotal = useMemo(() => tot(todayTxs, profileTagUuid), [todayTxs, profileTagUuid]);
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
-  const weekTotal = useMemo(() => tot(weekTxs), [weekTxs]);
+  const weekTotal = useMemo(() => tot(weekTxs, profileTagUuid), [weekTxs, profileTagUuid]);
 
   /** Human label for the calendar month used by "This Month" (same rule as `filterTx(..., "month")`). */
   const calendarMonthLabel = useMemo(() => {
@@ -1096,24 +1184,24 @@ export default function App({ onReady }) {
   const breakdown = useMemo(() => {
     const m = {};
     filtered.forEach((tx) => {
-      m[tx.category] = (m[tx.category] || 0) + tx.amount;
+      m[tx.category] = (m[tx.category] || 0) + effectiveAmount(tx, profileTagUuid);
     });
     return Object.entries(m)
       .map(([n, v]) => ({ name: n, value: v, ...getCat(categories, n) }))
       .sort((a, b) => b.value - a.value);
-  }, [filtered, categories]);
+  }, [filtered, categories, profileTagUuid]);
 
   const PAY_COLORS = ["#60A5FA", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6", "#22D3EE", "#FB923C", "#94A3B8"];
   const paymentBreakdown = useMemo(() => {
     const m = {};
     filtered.forEach((tx) => {
       const p = tx.payment || "Unknown";
-      m[p] = (m[p] || 0) + tx.amount;
+      m[p] = (m[p] || 0) + effectiveAmount(tx, profileTagUuid);
     });
     return Object.entries(m)
       .map(([name, value], i) => ({ name, value, c: PAY_COLORS[i % PAY_COLORS.length] }))
       .sort((a, b) => b.value - a.value);
-  }, [filtered]);
+  }, [filtered, profileTagUuid]);
 
   const dailyData = useMemo(() => {
     const loc = (dateLocale && String(dateLocale).trim()) || (locale && String(locale).trim()) || undefined;
@@ -1121,18 +1209,18 @@ export default function App({ onReady }) {
       const d = dAgo(13 - i);
       return {
         label: new Date(d + "T00:00:00").toLocaleDateString(loc, { day: "numeric", month: "short" }),
-        amount: tot(txs.filter((t) => t.date === d)),
+        amount: tot(txs.filter((t) => t.date === d), profileTagUuid),
       };
     });
-  }, [txs, dateLocale, locale]);
+  }, [txs, dateLocale, locale, profileTagUuid]);
 
   const catSpent = useMemo(() => {
     const m = {};
     monthTxs.forEach((t) => {
-      m[t.category] = (m[t.category] || 0) + t.amount;
+      m[t.category] = (m[t.category] || 0) + effectiveAmount(t, profileTagUuid);
     });
     return m;
-  }, [monthTxs]);
+  }, [monthTxs, profileTagUuid]);
 
   /** Budgets tab: over-limit first, then by % used (desc), then name. */
   const budgetEntriesSorted = useMemo(() => {
@@ -1188,12 +1276,22 @@ export default function App({ onReady }) {
           await deleteMirrorsForOwnerTransaction(db, uidRef.current, tx);
         }
         await deleteDoc(doc(db, "users", uidRef.current, "transactions", id));
+        const label = tx
+          ? `${formatMoney(Number(tx.amount) || 0)} · ${tx.category || "Expense"}`
+          : "Removed from your ledger";
+        notifyOp("Transaction deleted", label, {
+          type: "info",
+          tag: `tx-del-${id}`,
+          duration: 3500,
+        });
       } catch (e) {
         console.error(e);
+        notifyOp("Couldn't delete", "Check your connection and try again.", { type: "error", duration: 5000 });
       }
       return;
     }
     setTxs((p) => p.filter((t) => t.id !== id));
+    notifyOp("Transaction deleted", "Removed from your ledger", { type: "info", duration: 2500 });
   }
 
   async function confirmDeleteAllExpenses() {
@@ -1315,7 +1413,11 @@ export default function App({ onReady }) {
       setPreviewImg(null);
       setScanLineItems(null);
       setTab("home");
-      dlg.toast(`Saved ${formatMoney(newTx.amount)} · ${newTx.category}`, { type: "success" });
+      notifyOp("Expense saved", `${formatMoney(newTx.amount)} · ${newTx.category}`, {
+        type: "success",
+        tag: `tx-saved-${newTx.id}`,
+        onClick: () => { setSelectedTx(newTx); setTab("home"); },
+      });
     }, 2000);
   }
 
@@ -1446,6 +1548,51 @@ export default function App({ onReady }) {
         body: "Open the app to review, edit, and save your expense.",
         tag: "track-receipt-scan",
       });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Unified notifier for every user-triggered operation.
+   *
+   * Always shows an in-app toast (even when the tab is focused) and additionally
+   * raises a native browser notification + haptic vibration so the user is made
+   * aware even when the app is backgrounded. Silently degrades when the
+   * Notification / Vibration APIs are unavailable or denied — we never block a
+   * save on a missing permission.
+   */
+  function notifyOp(title, body, opts = {}) {
+    const { type = "success", duration = 3000, tag, onClick } = opts;
+    try {
+      dlg.toast(body || title, {
+        type,
+        title,
+        duration,
+        actionLabel: onClick ? "View" : undefined,
+        onClick,
+      });
+    } catch {
+      /* ignore */
+    }
+    try {
+      if ("Notification" in window) {
+        if (Notification.permission === "default") {
+          void Notification.requestPermission();
+        } else if (Notification.permission === "granted") {
+          const n = new Notification(title, {
+            body: body || "",
+            tag: tag || title,
+            icon: "/favicon.ico",
+          });
+          if (onClick) n.onclick = () => { try { window.focus(); } catch { /* ignore */ } onClick(); };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(40);
     } catch {
       /* ignore */
     }
@@ -2035,7 +2182,7 @@ export default function App({ onReady }) {
     // Payment method breakdown for this month
     const payBreakdown = {};
     monthTxs.forEach((t) => {
-      payBreakdown[t.payment] = (payBreakdown[t.payment] || 0) + t.amount;
+      payBreakdown[t.payment] = (payBreakdown[t.payment] || 0) + effectiveAmount(t, profileTagUuid);
     });
 
     // Last 7 days total
@@ -2046,7 +2193,7 @@ export default function App({ onReady }) {
         cutoff.setDate(cutoff.getDate() - 7);
         return d >= cutoff;
       })
-      .reduce((s, t) => s + t.amount, 0);
+      .reduce((s, t) => s + effectiveAmount(t, profileTagUuid), 0);
 
     // Budget status per category
     const budgetStatus = Object.entries(budgets).map(([cat, limit]) => ({
@@ -2056,11 +2203,13 @@ export default function App({ onReady }) {
       pct: Math.round(((catSpent[cat] || 0) / limit) * 100),
     }));
 
-    // Top 10 individual transactions this month
+    // Top 10 individual transactions this month (use the slave's own share for mirrors so
+    // AI insights don't over-count split bills that the user didn't actually pay in full).
     const topTx = [...monthTxs]
-      .sort((a, b) => b.amount - a.amount)
+      .map((t) => ({ ...t, _eff: effectiveAmount(t, profileTagUuid) }))
+      .sort((a, b) => b._eff - a._eff)
       .slice(0, 10)
-      .map((t) => ({ amount: t.amount, cat: t.category, notes: t.notes, date: t.date }));
+      .map((t) => ({ amount: t._eff, cat: t.category, notes: t.notes, date: t.date }));
 
     const currency = currencyCode || "INR";
     const summary = {
@@ -2822,6 +2971,7 @@ export default function App({ onReady }) {
                   categories={categories}
                   formatMoney={formatMoney}
                   dateLocale={dateLocale || locale}
+                  selfProfileUuid={profileTagUuid || ""}
                 />
               ))}
             </div>

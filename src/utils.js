@@ -53,10 +53,33 @@ export const filterTx = (txs, f, cs, ce) => {
     return true;
   });
 };
+/** Coerce a possibly-string amount to a finite number (falls back to 0). */
+function coerceAmount(raw) {
+  const a = typeof raw === "number" && Number.isFinite(raw) ? raw : parseFloat(String(raw ?? ""));
+  return Number.isFinite(a) ? a : 0;
+}
+
+/**
+ * Return the amount that actually counts against the current user's ledger.
+ *
+ * For a mirror (a transaction synced from a split contact), the slave did not pay the full
+ * bill — only their share recorded in `split.people[i].a`. We look that entry up by the
+ * slave's own profile UUID. If no match is found we fall back to the full amount so old
+ * mirrors without a `u` field still display something sensible.
+ */
+export function effectiveAmount(tx, selfProfileUuid) {
+  const full = coerceAmount(tx?.amount);
+  const isMirror =
+    tx && typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim().length > 0;
+  if (!isMirror) return full;
+  const people = Array.isArray(tx?.split?.people) ? tx.split.people : [];
+  const uuid = String(selfProfileUuid || "").trim();
+  if (!people.length || !uuid) return full;
+  const selfEntry = people.find((p) => typeof p?.u === "string" && p.u === uuid);
+  if (!selfEntry) return full;
+  return coerceAmount(selfEntry.a);
+}
+
 /** Sum expense amounts; coerces Firestore/string values so totals never break from type drift. */
-export const tot = (txs) =>
-  txs.reduce((s, t) => {
-    const raw = t?.amount;
-    const a = typeof raw === "number" && Number.isFinite(raw) ? raw : parseFloat(String(raw ?? ""));
-    return s + (Number.isFinite(a) ? a : 0);
-  }, 0);
+export const tot = (txs, selfProfileUuid) =>
+  txs.reduce((s, t) => s + effectiveAmount(t, selfProfileUuid), 0);

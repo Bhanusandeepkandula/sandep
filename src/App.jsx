@@ -62,7 +62,13 @@ import {
   PENDING_LOGIN_EMAIL_KEY,
 } from "./auth/pinProfiles.js";
 import { parseExpenseCsv } from "./importParse.js";
-import { extractExpenseJson, normalizeScanResult, formatMissingScanFieldsMessage } from "./scanAi.js";
+import {
+  extractExpenseJson,
+  normalizeScanResult,
+  formatMissingScanFieldsMessage,
+  isVisionTransactionList,
+  buildImportRowsFromVisionTransactions,
+} from "./scanAi.js";
 import { convertOcrToCsv } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
@@ -1094,10 +1100,10 @@ export default function App() {
         }
 
         userContent = [
-          { type: "image_url", image_url: { url: raw, detail: "low" } },
+          { type: "image_url", image_url: { url: raw, detail: "auto" } },
           {
             type: "text",
-            text: `${ocrText ? `OCR text (use as hint only): ${ocrText}\n\n` : ""}Extract the purchase EXPENSE from this receipt (money spent). Ignore salary slips, deposit slips, or pure credit notices.\n\nReturn ONLY one JSON object with this shape (use null for any value you cannot read clearly; never guess totals or dates):\n{"total":number|null,"category":string|null,"date":"YYYY-MM-DD"|null,"notes":string|null,"payment":string|null,"line_items":[...]|null,"missing_fields":["total","date"]}\nExample when all clear: "missing_fields":[]\nExample when date and total are unreadable: "missing_fields":["date","total"]\n\n"missing_fields" MUST list every field you could not read reliably, using exactly these keys: "total", "date", "category", "payment", "notes", "line_items". If the total, date, or merchant is blurry, cropped, or missing, include the matching key.\n\nCategories (pick closest or null): ${catList}\nPayments (pick closest or null): ${payList}\nUse plain numbers without currency symbols in JSON.`,
+            text: `${ocrText ? `OCR text (use as hint only): ${ocrText}\n\n` : ""}STEP 1 — Classify the image:\n- "single_receipt": one paper/store receipt or one clear bill with ONE total to log.\n- "transaction_list": banking app screenshot, account history, or any screen showing MULTIPLE dated rows (each with merchant + amount), even if cropped.\n\nSTEP 2 — Return ONLY valid JSON:\n\nA) If "image_kind":"single_receipt", use this shape:\n{"image_kind":"single_receipt","total":number|null,"category":string|null,"date":"YYYY-MM-DD"|null,"notes":string|null,"payment":string|null,"line_items":null|[],"missing_fields":[]}\n\nB) If "image_kind":"transaction_list", use:\n{"image_kind":"transaction_list","transactions":[{"date":"YYYY-MM-DD","amount":number,"notes":"merchant or label","category_hint":string|null,"payment_hint":string|null,"is_credit_or_income":boolean}]}\nRules for transaction_list:\n- Emit ONE object per visible spending row (purchases, Zelle sent, transfers out, debits).\n- Set "is_credit_or_income": true for deposits, incoming transfers, green + amounts, salary credits — OMIT those from expenses (still set the flag; do not list pure income rows as expenses).\n- Use positive "amount" for money leaving the account.\n- Read EVERY row you can see (not only the first).\n- "category_hint" / "payment_hint": guess from merchant + type (e.g. Food, Card) using: Categories: ${catList} | Payments: ${payList}\n\nFor single_receipt only: "missing_fields" lists unreadable keys among: "total","date","category","payment","notes","line_items".\nUse plain numbers, no currency symbols.`,
           },
         ];
       } else {
@@ -1110,7 +1116,7 @@ export default function App() {
           return;
         }
 
-        userContent = `Extract the main purchase EXPENSE from this receipt text (money spent only). Skip salary/bank credit/deposit-only text.\n\nReturn ONLY one JSON object with "missing_fields" as an array of keys (same rules as for images). Example: {"total":120,"missing_fields":[]} or {"total":null,"missing_fields":["total","date"]}.\n\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.\n\nReceipt text:\n${text}`;
+        userContent = `Classify the text as either one receipt (single_receipt) or a bank/statement listing (transaction_list) with multiple lines.\n\nSame JSON rules as for receipt images: use image_kind "single_receipt" with total/category/date OR "transaction_list" with a "transactions" array (one row per expense line in the text). Mark credits/income with is_credit_or_income: true and skip them as expenses.\n\nCategories: ${catList}\nPayments: ${payList}\n\nReceipt or statement text:\n${text}`;
       }
 
       setScanPhase("ai");
@@ -1125,16 +1131,18 @@ export default function App() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
         body: JSON.stringify({
           model: "gpt-4o-mini",
-          max_tokens: 1200,
+          max_tokens: 4096,
           temperature: 0,
           messages: [
             {
               role: "system",
               content:
-                "You extract structured EXPENSE data from receipts and bills only. Return ONLY valid JSON, no markdown, no extra text. " +
-                "The total must be money the user spent (purchase), not salary, bank credits, deposits, or refunds received. " +
-                "Always include the array \"missing_fields\" listing any of: total, date, category, payment, notes, line_items that are unreadable, cropped, or ambiguous—never invent amounts or dates. " +
-                "If the image is only a bank credit or income notice with no purchase, return {\"total\":0} or omit total and explain via missing_fields as appropriate.",
+                "You read receipt photos AND banking app screenshots. Return ONLY valid JSON, no markdown, no extra text. " +
+                "Decide image_kind first: single_receipt (one purchase / one total) vs transaction_list (multiple rows: bank history, Zelle list, etc.). " +
+                "For transaction_list, output every expense row you can read in \"transactions\"; never stop at the first row. " +
+                "For single_receipt, totals must reflect money spent (purchases), not bank credits or deposits. " +
+                "Include \"missing_fields\" only on single_receipt when fields are unreadable (total, date, category, payment, notes, line_items). " +
+                "Mark is_credit_or_income true for incoming money so the app can skip it as an expense.",
             },
             { role: "user", content: userContent },
           ],
@@ -1158,6 +1166,32 @@ export default function App() {
       setScanPhase("parse");
       const txt = String(d?.choices?.[0]?.message?.content || "{}");
       const rawJson = extractExpenseJson(txt);
+
+      if (isVisionTransactionList(/** @type {Record<string, unknown>} */ (rawJson))) {
+        const txArr = Array.isArray(rawJson.transactions) ? rawJson.transactions : [];
+        const importRows = buildImportRowsFromVisionTransactions(txArr, {
+          categories: catNames,
+          payments: payNames,
+        });
+        if (importRows.length > 0) {
+          clearScanHints();
+          setScanErr("");
+          setImportBundle({ fileName: f.name || "from-screenshot.csv", rows: importRows });
+          setAddMode("import");
+          notifyScanReadyIfBackground();
+          setScanPhase(null);
+          setStep("importPreview");
+          return;
+        }
+        clearScanHints();
+        setScanErr(
+          "This looks like a transaction list, but no expense rows could be read (or only credits were visible). Try a clearer screenshot or use Import CSV."
+        );
+        setScanPhase(null);
+        setStep("form");
+        return;
+      }
+
       const normalized = normalizeScanResult(rawJson, {
         categoryNames: catNames,
         payments: payNames,

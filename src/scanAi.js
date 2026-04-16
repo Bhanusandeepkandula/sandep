@@ -1,4 +1,4 @@
-import { matchCatalogName, parseAmount } from "./importParse.js";
+import { matchCatalogName, parseAmount, parseDateToISO } from "./importParse.js";
 
 /**
  * Pull JSON from model output (handles markdown fences and extra prose).
@@ -152,4 +152,87 @@ export function normalizeScanResult(raw, ctx) {
     lineItems,
     missingFields,
   };
+}
+
+/**
+ * True when the model classified this as a banking / multi-row screen (not one paper receipt).
+ * @param {Record<string, unknown>} raw
+ */
+export function isVisionTransactionList(raw) {
+  if (!raw || typeof raw !== "object") return false;
+  const kind = raw.image_kind;
+  const txs = raw.transactions;
+  if (kind === "transaction_list" && Array.isArray(txs) && txs.length > 0) return true;
+  if (Array.isArray(txs) && txs.length >= 2) return true;
+  return false;
+}
+
+/**
+ * One import-preview row per visible expense line from a bank / transactions screenshot.
+ * Skips rows marked as income/credit by the model.
+ * @param {unknown[]} txs
+ * @param {{ categories: string[]; payments: string[] }} ctx
+ */
+export function buildImportRowsFromVisionTransactions(txs, ctx) {
+  const categories = ctx.categories || [];
+  const payments = ctx.payments || [];
+  const defaultPay = payments[0] || "";
+
+  /** @type {Array<{ line: number; amount: number; date: string; category: string; payment: string; notes: string; tags: string[]; ok: boolean; error?: string }>} */
+  const rows = [];
+  if (!Array.isArray(txs)) return rows;
+
+  let line = 1;
+  for (const t of txs) {
+    line++;
+    if (!t || typeof t !== "object") continue;
+    const o = /** @type {Record<string, unknown>} */ (t);
+
+    if (o.is_credit_or_income === true || o.is_expense === false) continue;
+
+    const amtRaw = o.amount ?? o.total ?? "";
+    const amount =
+      typeof amtRaw === "number" && Number.isFinite(amtRaw)
+        ? Math.abs(amtRaw)
+        : parseAmount(String(amtRaw));
+
+    const dateStr = typeof o.date === "string" ? o.date.trim() : "";
+    const dateIso = dateStr ? parseDateToISO(dateStr) : null;
+
+    const notes = String(o.notes ?? o.merchant ?? o.description ?? o.payee ?? "").trim();
+
+    const catHint = String(o.category ?? o.category_hint ?? "").trim();
+    const cat =
+      (catHint ? matchCatalogName(catHint, categories) : null) ??
+      (notes ? matchCatalogName(notes, categories) : null) ??
+      (categories[0] || null);
+
+    const payHint = String(o.payment ?? o.payment_hint ?? "").trim();
+    const pay = payHint ? matchCatalogName(payHint, payments) : defaultPay;
+
+    let error = "";
+    if (!Number.isFinite(amount) || amount <= 0) {
+      error = "Missing or invalid amount";
+    } else if (!dateIso) {
+      error = "Missing or invalid date";
+    } else if (!cat && categories.length > 0) {
+      error = "Could not match category — pick from list";
+    } else if (!pay && payments.length > 0) {
+      error = "Could not match payment method";
+    }
+
+    rows.push({
+      line,
+      amount: Number.isFinite(amount) ? amount : 0,
+      date: dateIso || "",
+      category: cat || "",
+      payment: pay || defaultPay,
+      notes,
+      tags: [],
+      ok: !error,
+      error: error || undefined,
+    });
+  }
+
+  return rows;
 }

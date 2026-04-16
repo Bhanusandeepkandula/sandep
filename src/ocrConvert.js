@@ -3,6 +3,8 @@
  * Requires VITE_OPENAI_API_KEY to be set at build time.
  */
 
+import { matchCatalogName } from "./importParse.js";
+
 const OPENAI_KEY = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
 const SYSTEM_PROMPT = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
@@ -13,19 +15,81 @@ date,amount,category,payment,notes,tags
 Column rules:
 - date: YYYY-MM-DD. If only day/month visible, use current year. If ambiguous (e.g. "12/05"), treat as DD/MM.
 - amount: positive number only, no currency symbols or commas.
-- category: pick the closest match from the provided Categories list. If nothing fits, use the first category.
-- payment: pick the closest match from the provided Payments list. If nothing fits, use the first payment.
-- notes: merchant/restaurant name or short description (max 60 chars). For receipts, use the business name.
+- category: MUST be copied EXACTLY (same spelling, same case) from the Categories list. Pick the closest match. If nothing fits, use the very first category in the list.
+- payment: MUST be copied EXACTLY from the Payments list. Pick the closest match. If nothing fits, use the very first payment in the list.
+- notes: merchant/restaurant name or short description (max 60 chars).
 - tags: optional comma-separated keywords (leave empty if unsure).
 
 Amount rules — IMPORTANT:
 - For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual items.
 - For a bank statement or transaction list with multiple separate transactions: output one row per transaction.
-- Always prefer GRAND TOTAL > TOTAL > subtotal. Ignore taxes, service charges, discounts listed separately — they are already included in the grand total.
+- Always prefer GRAND TOTAL > TOTAL > subtotal. Taxes and service charges are included in the grand total.
 
 Output rules:
 - Return ONLY the CSV text. No markdown, no explanation, no code fences.
 - Use double-quotes around any field that contains a comma.`;
+
+/**
+ * Force every category/payment cell to exactly match a catalog entry.
+ * Falls back to the first item in the list when nothing matches.
+ * @param {string} csv
+ * @param {string[]} categories
+ * @param {string[]} payments
+ * @returns {string}
+ */
+function fixCatalogColumns(csv, categories, payments) {
+  if (!categories.length && !payments.length) return csv;
+  const lines = csv.split("\n");
+  if (lines.length < 2) return csv;
+
+  const header = lines[0];
+  const cols = header.split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+  const catIdx = cols.indexOf("category");
+  const payIdx = cols.indexOf("payment");
+
+  const fixed = [header];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Parse CSV row respecting quoted fields
+    const cells = parseRow(line);
+
+    if (catIdx >= 0 && categories.length) {
+      const raw = cells[catIdx] || "";
+      const matched = matchCatalogName(raw, categories);
+      cells[catIdx] = matched || categories[0];
+    }
+    if (payIdx >= 0 && payments.length) {
+      const raw = cells[payIdx] || "";
+      const matched = matchCatalogName(raw, payments);
+      cells[payIdx] = matched || payments[0];
+    }
+
+    fixed.push(cells.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+  }
+  return fixed.join("\n");
+}
+
+/** Minimal CSV row parser — handles double-quoted fields. */
+function parseRow(line) {
+  const cells = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQ = !inQ;
+    } else if (ch === "," && !inQ) {
+      cells.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
 
 /**
  * Convert raw OCR text to expense CSV using OpenAI.
@@ -40,12 +104,12 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
     );
   }
 
-  const catList = categories.length ? categories.join(", ") : "(none — use a generic label)";
-  const payList = payments.length ? payments.join(", ") : "(none — use a generic label)";
+  const catList = categories.length ? categories.join(", ") : "(none)";
+  const payList = payments.length ? payments.join(", ") : "(none)";
 
   const userMsg = [
-    `Categories: ${catList}`,
-    `Payments: ${payList}`,
+    `Categories (use exactly as written): ${catList}`,
+    `Payments (use exactly as written): ${payList}`,
     `Today's date: ${new Date().toISOString().split("T")[0]}`,
     ``,
     `OCR text:`,
@@ -81,6 +145,9 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
   const raw = String(data?.choices?.[0]?.message?.content || "").trim();
   if (!raw) throw new Error("OpenAI returned an empty response. Try again.");
 
-  // Strip markdown code fences if the model wraps output in ```csv ... ```
-  return raw.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  // Strip markdown code fences if model wraps output
+  const csv = raw.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+  // Post-process: guarantee category/payment exactly match catalog entries
+  return fixCatalogColumns(csv, categories, payments);
 }

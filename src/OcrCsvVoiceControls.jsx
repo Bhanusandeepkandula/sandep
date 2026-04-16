@@ -95,8 +95,8 @@ export function OcrCsvVoiceControls({ onAppend, disabled = false, active = true 
           cursor: disabled ? "not-allowed" : "pointer",
           fontWeight: 600,
           fontSize: 13,
-          background: listening ? "rgba(239,68,68,0.15)" : T.card2,
-          borderColor: listening ? "rgba(239,68,68,0.45)" : T.bdr,
+          background: listening ? T.ddim : T.card2,
+          borderColor: listening ? `${T.dng}73` : T.bdr,
           color: listening ? T.dng : T.txt,
         }}
       >

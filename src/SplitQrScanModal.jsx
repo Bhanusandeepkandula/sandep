@@ -168,7 +168,7 @@ export function SplitQrScanModal({ open, onClose, onDecoded }) {
             borderRadius: 10,
             border: "none",
             background: paste.trim() ? T.acc : T.mut,
-            color: "#000",
+            color: T.btnTxt,
             fontWeight: 800,
             cursor: paste.trim() ? "pointer" : "not-allowed",
           }}

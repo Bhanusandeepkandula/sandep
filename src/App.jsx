@@ -174,7 +174,7 @@ function ExternalLlmCsvPromptPanel({ prompt, onCopy, disabled, blurb }) {
               borderRadius: T.r,
               border: "none",
               background: disabled ? T.mut : T.acc,
-              color: "#000",
+              color: T.btnTxt,
               fontWeight: 700,
               fontSize: 13,
               cursor: disabled ? "not-allowed" : "pointer",
@@ -2109,7 +2109,7 @@ export default function App({ onReady }) {
             padding: `12px ${px}px`,
             paddingTop: `max(12px, ${safeTop})`,
             background: T.wdim,
-            borderBottom: "1px solid rgba(245,158,11,0.35)",
+            borderBottom: "1px solid " + T.warn + "59",
             fontSize: 11,
             color: T.warn,
             textAlign: "left",
@@ -2138,8 +2138,8 @@ export default function App({ onReady }) {
               marginTop: 10,
               padding: "8px 14px",
               borderRadius: T.r,
-              border: "1px solid rgba(245,158,11,0.45)",
-              background: "rgba(0,0,0,0.2)",
+              border: `1px solid ${T.warn}73`,
+              background: T.id === "light" ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.2)",
               color: T.warn,
               fontSize: 12,
               fontWeight: 700,
@@ -2195,7 +2195,7 @@ export default function App({ onReady }) {
             <div
               style={{
                 margin: `0 ${px}px 14px`,
-                background: "linear-gradient(135deg,#17173A 0%,#0D1628 100%)",
+                background: T.heroGrad,
                 borderRadius: T.rLg,
                 padding: 22,
                 border: `1px solid ${T.bdr}`,
@@ -2211,7 +2211,7 @@ export default function App({ onReady }) {
                   width: 130,
                   height: 130,
                   borderRadius: "50%",
-                  background: "rgba(34,197,94,0.05)",
+                  background: T.adim,
                 }}
               />
               <div
@@ -2222,7 +2222,7 @@ export default function App({ onReady }) {
                   width: 90,
                   height: 90,
                   borderRadius: "50%",
-                  background: "rgba(96,165,250,0.05)",
+                  background: T.bdim,
                 }}
               />
               <div
@@ -2299,11 +2299,11 @@ export default function App({ onReady }) {
                 ) : null}
               </div>
               <div style={{ display: "flex", gap: 12 }}>
-                <div style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
+                <div style={{ flex: 1, background: T.id === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
                   <div style={{ fontSize: 11, color: T.sub, marginBottom: 3 }}>Today</div>
                   <div style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(todayTotal)}</div>
                 </div>
-                <div style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
+                <div style={{ flex: 1, background: T.id === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
                   <div style={{ fontSize: 11, color: T.sub, marginBottom: 3 }}>This Week</div>
                   <div style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(weekTotal)}</div>
                 </div>
@@ -2366,8 +2366,8 @@ export default function App({ onReady }) {
                 }}
                 style={{
                   margin: `0 ${px}px 14px`,
-                  background: "rgba(245,158,11,0.09)",
-                  border: "1px solid rgba(245,158,11,0.3)",
+                  background: T.wdim,
+                  border: `1px solid ${T.warn}4D`,
                   borderRadius: T.r,
                   padding: "12px 16px",
                   display: "flex",
@@ -2389,7 +2389,7 @@ export default function App({ onReady }) {
               <div
                 style={{
                   margin: `0 ${px}px 14px`,
-                  background: "rgba(34,197,94,0.07)",
+                  background: T.adim,
                   border: "1px solid rgba(34,197,94,0.22)",
                   borderRadius: T.r,
                   padding: "12px 16px",
@@ -2409,7 +2409,7 @@ export default function App({ onReady }) {
                     height: 30,
                     border: "none",
                     borderRadius: T.r,
-                    background: "rgba(0,0,0,0.2)",
+                    background: T.id === "light" ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.2)",
                     color: T.sub,
                     cursor: "pointer",
                     display: "flex",
@@ -2494,7 +2494,7 @@ export default function App({ onReady }) {
                     style={{
                       margin: `0 ${px}px 10px`,
                       background: over ? T.ddim : T.wdim,
-                      border: `1px solid ${over ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
+                      border: `1px solid ${over ? `${T.dng}4D` : `${T.warn}4D`}`,
                       borderRadius: T.r,
                       padding: "10px 14px",
                       display: "flex",
@@ -2623,7 +2623,7 @@ export default function App({ onReady }) {
                   maxWidth: maxShell,
                   marginLeft: "auto",
                   marginRight: "auto",
-                  background: "rgba(10,10,22,0.96)",
+                  background: T.id === "light" ? "rgba(240,240,245,0.98)" : "rgba(10,10,22,0.96)",
                   backdropFilter: "blur(8px)",
                   display: "flex",
                   flexDirection: "column",
@@ -2833,7 +2833,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid rgba(239,68,68,0.35)",
+                      border: "1px solid ${T.dng}59",
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 16,
@@ -2957,7 +2957,7 @@ export default function App({ onReady }) {
                     borderRadius: T.rLg,
                     background: ocrCsvBusy ? T.mut : T.acc,
                     border: "none",
-                    color: "#000",
+                    color: T.btnTxt,
                     fontSize: 16,
                     fontWeight: 800,
                     cursor: ocrCsvBusy ? "not-allowed" : "pointer",
@@ -3016,7 +3016,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid rgba(239,68,68,0.35)",
+                      border: "1px solid ${T.dng}59",
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 12,
@@ -3097,7 +3097,7 @@ export default function App({ onReady }) {
                           borderRadius: T.r,
                           border: "none",
                           background: T.acc,
-                          color: "#000",
+                          color: T.btnTxt,
                           fontWeight: 800,
                           cursor: "pointer",
                         }}
@@ -3144,7 +3144,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid rgba(239,68,68,0.35)",
+                      border: "1px solid ${T.dng}59",
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 14,
@@ -3185,7 +3185,7 @@ export default function App({ onReady }) {
                           const pays = (catalogRef.current.payments || []).filter(Boolean);
                           const cellInput = { background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 4, color: T.txt, padding: "4px 6px", fontSize: 16, width: "100%" };
                           return (
-                            <tr key={r.line} style={{ borderTop: `1px solid ${T.acc}`, background: "rgba(0,255,100,0.04)" }}>
+                            <tr key={r.line} style={{ borderTop: `1px solid ${T.acc}`, background: T.adim }}>
                               <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
                               <td style={{ padding: "6px" }} colSpan={1}>
                                 <input
@@ -3232,7 +3232,7 @@ export default function App({ onReady }) {
                                 <button
                                   type="button"
                                   onClick={saveEditImportRow}
-                                  style={{ background: T.acc, color: "#000", border: "none", borderRadius: 4, padding: "4px 8px", fontWeight: 700, fontSize: 11, cursor: "pointer", marginRight: 4 }}
+                                  style={{ background: T.acc, color: T.btnTxt, border: "none", borderRadius: 4, padding: "4px 8px", fontWeight: 700, fontSize: 11, cursor: "pointer", marginRight: 4 }}
                                 >
                                   Save
                                 </button>
@@ -3293,7 +3293,7 @@ export default function App({ onReady }) {
                     borderRadius: T.rLg,
                     background: importSaving || importBundle.rows.every((r) => !r.ok) ? T.mut : T.acc,
                     border: "none",
-                    color: "#000",
+                    color: T.btnTxt,
                     fontSize: 17,
                     fontWeight: 800,
                     cursor: importSaving ? "not-allowed" : "pointer",
@@ -3355,7 +3355,7 @@ export default function App({ onReady }) {
                         left: 0,
                         right: 0,
                         padding: "8px 12px",
-                        background: "linear-gradient(transparent,rgba(0,0,0,0.75))",
+                        background: T.id === "light" ? "linear-gradient(transparent,rgba(0,0,0,0.45))" : "linear-gradient(transparent,rgba(0,0,0,0.75))",
                         fontSize: 12,
                         color: T.acc,
                       }}
@@ -3370,8 +3370,8 @@ export default function App({ onReady }) {
                 {scanFillPrompt ? (
                   <div
                     style={{
-                      background: "rgba(245,158,11,0.09)",
-                      border: "1px solid rgba(245,158,11,0.35)",
+                      background: T.wdim,
+                      border: "1px solid " + T.warn + "59",
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 14,
@@ -3417,7 +3417,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid rgba(239,68,68,0.35)",
+                      border: "1px solid ${T.dng}59",
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 14,
@@ -3662,7 +3662,7 @@ export default function App({ onReady }) {
                 </div>
 
                 {fErr && (
-                  <div style={{ background: T.ddim, border: "1px solid rgba(239,68,68,0.35)", borderRadius: T.r, padding: "12px 14px", marginBottom: 18, fontSize: 13, color: T.dng, lineHeight: 1.45 }}>
+                  <div style={{ background: T.ddim, border: "1px solid ${T.dng}59", borderRadius: T.r, padding: "12px 14px", marginBottom: 18, fontSize: 13, color: T.dng, lineHeight: 1.45 }}>
                     {fErr}
                   </div>
                 )}
@@ -3677,7 +3677,7 @@ export default function App({ onReady }) {
                     borderRadius: T.rLg,
                     background: savingExpense ? T.mut : T.acc,
                     border: "none",
-                    color: "#000",
+                    color: T.btnTxt,
                     fontSize: 17,
                     fontWeight: 800,
                     cursor: savingExpense ? "not-allowed" : "pointer",
@@ -4070,7 +4070,7 @@ export default function App({ onReady }) {
             <div
               style={{
                 margin: `0 ${px}px 14px`,
-                background: "linear-gradient(135deg,#17173A 0%,#0D1628 100%)",
+                background: T.heroGrad,
                 borderRadius: T.rLg,
                 padding: 20,
                 border: `1px solid ${T.bdr}`,
@@ -4131,11 +4131,11 @@ export default function App({ onReady }) {
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     {Object.keys(budgets).length > 0 && (
-                      <button type="button" onClick={() => void clearAllBudgets()} disabled={fbStatus !== "ready"} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, border: `1px solid rgba(239,68,68,0.4)`, background: T.ddim, color: T.dng, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                      <button type="button" onClick={() => void clearAllBudgets()} disabled={fbStatus !== "ready"} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.dng}66`, background: T.ddim, color: T.dng, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
                         <Trash2 size={12} /> Clear
                       </button>
                     )}
-                    <button type="button" onClick={() => { setBmCat(""); setBmAmt(""); setShowBM(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.acc, border: "none", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    <button type="button" onClick={() => { setBmCat(""); setBmAmt(""); setShowBM(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.acc, border: "none", color: T.btnTxt, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                       + Add
                     </button>
                   </div>
@@ -4177,7 +4177,7 @@ export default function App({ onReady }) {
                   <div style={{ fontSize: 13, color: T.sub }}>
                     {fixedExpenses.length > 0 ? <><strong style={{ color: T.txt }}>{fixedExpenses.length}</strong> fixed expense{fixedExpenses.length !== 1 ? "s" : ""}</> : "No fixed expenses yet"}
                   </div>
-                  <button type="button" onClick={() => { setFixedDraft({ name: "", amount: "", category: categories[0]?.n || "Bills", dueDay: "1" }); setShowFixedModal(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.purp, border: "none", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  <button type="button" onClick={() => { setFixedDraft({ name: "", amount: "", category: categories[0]?.n || "Bills", dueDay: "1" }); setShowFixedModal(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.purp, border: "none", color: T.btnTxt, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                     + Add
                   </button>
                 </div>
@@ -4253,7 +4253,7 @@ export default function App({ onReady }) {
                   width: 52, height: 52, borderRadius: "50%",
                   background: `linear-gradient(135deg,${T.acc},${T.blue})`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 20, fontWeight: 800, color: "#000", flexShrink: 0,
+                  fontSize: 20, fontWeight: 800, color: T.btnTxt, flexShrink: 0,
                 }}
               >
                 {(profileName && profileName.trim()[0]) || "?"}
@@ -4395,7 +4395,7 @@ export default function App({ onReady }) {
                   onKeyDown={(e) => { if (e.key === "Enter" && newP.trim()) { void persistPeople([...people.map(normalizePerson), { n: newP.trim() }]); setNewP(""); } }}
                   style={{ ...inp, flex: 1, minWidth: 100, padding: "10px 12px", fontSize: 13 }}
                 />
-                <button type="button" onClick={() => { if (!newP.trim()) return; void persistPeople([...people.map(normalizePerson), { n: newP.trim() }]); setNewP(""); }} style={{ padding: "0 14px", borderRadius: T.r, background: T.acc, border: "none", color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                <button type="button" onClick={() => { if (!newP.trim()) return; void persistPeople([...people.map(normalizePerson), { n: newP.trim() }]); setNewP(""); }} style={{ padding: "0 14px", borderRadius: T.r, background: T.acc, border: "none", color: T.btnTxt, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
                   Add
                 </button>
                 <button type="button" onClick={() => setShowSplitScan(true)} style={{ padding: "0 10px", borderRadius: T.r, border: `1px solid ${T.acc}`, background: T.adim, color: T.acc, fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
@@ -4449,7 +4449,7 @@ export default function App({ onReady }) {
                 type="button"
                 disabled={!firebaseUser?.email || fbStatus !== "ready"}
                 onClick={() => { setDeleteAllErr(""); setDeleteAllPin(""); setDeleteAllModal(true); }}
-                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid rgba(239,68,68,0.4)`, background: "rgba(239,68,68,0.06)", cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
+                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}66`, background: T.ddim, cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
               >
                 <Trash2 size={18} color={T.dng} />
                 <div style={{ flex: 1 }}>
@@ -4565,7 +4565,7 @@ export default function App({ onReady }) {
                   borderRadius: T.r,
                   background: T.acc,
                   border: "none",
-                  color: "#000",
+                  color: T.btnTxt,
                   fontSize: 14,
                   fontWeight: 700,
                   cursor: !bmAmt || isNaN(+bmAmt) || +bmAmt <= 0 || !bmCat ? "not-allowed" : "pointer",
@@ -4711,7 +4711,7 @@ export default function App({ onReady }) {
                   borderRadius: T.r,
                   background: T.purp,
                   border: "none",
-                  color: "#000",
+                  color: T.btnTxt,
                   fontSize: 14,
                   fontWeight: 700,
                   cursor: !fixedDraft.name.trim() || !fixedDraft.amount ? "not-allowed" : "pointer",
@@ -4931,7 +4931,7 @@ export default function App({ onReady }) {
               background: T.card,
               borderRadius: T.rLg,
               padding: 22,
-              border: `1px solid rgba(239,68,68,0.35)`,
+              border: `1px solid ${T.dng}59`,
               boxSizing: "border-box",
             }}
           >
@@ -5104,11 +5104,11 @@ export default function App({ onReady }) {
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  boxShadow: "0 4px 22px rgba(34,197,94,0.45)",
+                  boxShadow: `0 4px 22px ${T.acc}73`,
                   transform: "translateY(-12px)",
                 }}
               >
-                <Plus size={28} color="#000" strokeWidth={3} />
+                <Plus size={28} color={T.btnTxt} strokeWidth={3} />
               </button>
             );
           const active = tab === item.id;

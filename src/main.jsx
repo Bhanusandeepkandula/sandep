@@ -5,7 +5,11 @@ import App from "./App.jsx";
 
 try {
   const saved = localStorage.getItem("track_theme");
-  if (saved) applyTheme(saved);
+  if (saved) {
+    applyTheme(saved);
+    const splash = document.getElementById("splash");
+    if (splash) splash.style.background = document.body.style.background;
+  }
 } catch {}
 
 function dismissSplash() {

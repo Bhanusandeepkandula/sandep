@@ -161,7 +161,7 @@ export function TxDetail({
               <input type="text" value={editDraft.notes} onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))} placeholder="Merchant or description" style={{ ...inp, padding: "10px 12px" }} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" onClick={saveEdit} style={{ flex: 2, padding: 14, borderRadius: 12, border: "none", background: T.acc, color: "#000", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <button type="button" onClick={saveEdit} style={{ flex: 2, padding: 14, borderRadius: 12, border: "none", background: T.acc, color: T.btnTxt, fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 <Check size={16} /> Save
               </button>
               <button type="button" onClick={cancelEdit} style={{ flex: 1, padding: 14, borderRadius: 12, border: `1px solid ${T.bdr}`, background: "transparent", color: T.sub, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
@@ -324,7 +324,7 @@ export function TxDetail({
                             </div>
                           )}
                           <button type="button" onClick={handleSaveSplit} disabled={splitPpl.length === 0}
-                            style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: splitPpl.length === 0 ? T.mut : T.acc, color: splitPpl.length === 0 ? T.sub : "#000", fontWeight: 800, fontSize: 14, cursor: splitPpl.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                            style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: splitPpl.length === 0 ? T.mut : T.acc, color: splitPpl.length === 0 ? T.sub : T.btnTxt, fontWeight: 800, fontSize: 14, cursor: splitPpl.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                             <Check size={16} /> Save Split
                           </button>
                         </>

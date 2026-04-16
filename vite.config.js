@@ -59,6 +59,44 @@ function resolveOpenAiApiKey(mode, cwd) {
   return String(process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || "").trim();
 }
 
+/** If .env* contains OPENAI_API_KEY= but value is blank, return that filename (else ""). */
+function openAiKeyLinePresentButEmpty(cwd) {
+  const files = [".env.local", ".env"];
+  const prefixes = ["OPENAI_API_KEY=", "VITE_OPENAI_API_KEY="];
+  for (const fileName of files) {
+    try {
+      const p = path.join(cwd, fileName);
+      if (!fs.existsSync(p)) continue;
+      for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t || t.startsWith("#")) continue;
+        for (const prefix of prefixes) {
+          if (!t.startsWith(prefix)) continue;
+          let v = t.slice(prefix.length).trim();
+          if (
+            (v.startsWith('"') && v.endsWith('"')) ||
+            (v.startsWith("'") && v.endsWith("'"))
+          ) {
+            v = v.slice(1, -1).trim();
+          }
+          if (!v) return fileName;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+function openAiKeyMissingMessage(cwd) {
+  const blankFile = openAiKeyLinePresentButEmpty(cwd);
+  if (blankFile) {
+    return `OPENAI_API_KEY is listed in ${blankFile} but the value is empty. Paste your secret key from https://platform.openai.com/api-keys after the equals sign (no spaces around =), save the file, and restart npm run dev.`;
+  }
+  return "OPENAI_API_KEY is not set. Add it to project-root .env.local or .env (see .env.example), or export OPENAI_API_KEY in your shell, then restart the dev server.";
+}
+
 /** Read JSON POST body (dev / preview only). */
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -151,17 +189,12 @@ function ocrCsvApiPlugin(mode, cwd) {
             if (!warnedMissingOpenAi) {
               warnedMissingOpenAi = true;
               console.warn(
-                "\n[vite] OPENAI_API_KEY is missing. Set it in .env.local or .env (see .env.example), or export OPENAI_API_KEY; restart dev after adding.\n"
+                `\n[vite] ${openAiKeyMissingMessage(cwd)}\n`
               );
             }
             res.statusCode = 503;
             res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error:
-                  "OPENAI_API_KEY is not set. Add it to project-root .env.local or .env (see .env.example), or export OPENAI_API_KEY in your shell, then restart the dev server.",
-              })
-            );
+            res.end(JSON.stringify({ error: openAiKeyMissingMessage(cwd) }));
             return;
           }
           const csv = await openAiOcrToCsv(key, ocrText);
@@ -192,12 +225,7 @@ function ocrCsvApiPlugin(mode, cwd) {
           if (!key) {
             res.statusCode = 503;
             res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error:
-                  "OPENAI_API_KEY is not set. Add it to project-root .env.local or .env (see .env.example), or export OPENAI_API_KEY in your shell, then restart the dev server.",
-              })
-            );
+            res.end(JSON.stringify({ error: openAiKeyMissingMessage(cwd) }));
             return;
           }
           const csv = await openAiOcrToCsv(key, ocrText);

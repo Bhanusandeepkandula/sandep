@@ -69,7 +69,7 @@ import {
   isVisionTransactionList,
   buildImportRowsFromVisionTransactions,
 } from "./scanAi.js";
-import { convertOcrToCsv, convertBillToCsvRobust } from "./ocrConvert.js";
+import { convertOcrToCsv, convertBillToCsvRobust, ocrTextLooksMissingFourDigitYear } from "./ocrConvert.js";
 import { buildImageToExpenseCsvPrompt } from "./ocrExternalLlmPrompt.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
@@ -213,6 +213,10 @@ export default function App() {
   const [ocrCsvErr, setOcrCsvErr] = useState("");
   /** Short prompts from the model when OCR/image data was incomplete — user should answer in the text box and convert again. */
   const [ocrCsvFollowUp, setOcrCsvFollowUp] = useState(/** @type {string[]} */ ([]));
+  /** Sent to OpenAI before CSV conversion so statement screenshots are not dated with a guessed year. */
+  const [ocrDateYear, setOcrDateYear] = useState(() => String(new Date().getFullYear()));
+  /** Optional 01–12 when OCR shows day-only lines. */
+  const [ocrDateMonth, setOcrDateMonth] = useState("");
   /** User cancelled mid-scan or navigated away from processing. */
   const scanCancelledRef = useRef(false);
   /** Abort in-flight Anthropic request when user cancels. */
@@ -1378,13 +1382,23 @@ export default function App() {
       setOcrCsvErr("Paste OCR text or run OCR on an image first.");
       return;
     }
+    const y = ocrDateYear.trim();
+    if (!/^\d{4}$/.test(y) || Number(y) < 1990 || Number(y) > 2100) {
+      setOcrCsvErr("Enter a valid 4-digit year (e.g. 2026) for these transactions before converting.");
+      return;
+    }
     setOcrCsvBusy(true);
     try {
       const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
       const payNames = (catalogRef.current.payments || []).filter(Boolean);
+      const dateContext = {
+        year: y,
+        ...(ocrDateMonth.trim() ? { month: ocrDateMonth.trim().padStart(2, "0") } : {}),
+      };
       const { csv, followUpQuestions } = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
         categories: catNames,
         payments: payNames,
+        dateContext,
       });
       setOcrCsvOut(csv);
       setOcrCsvFollowUp(followUpQuestions);
@@ -2718,6 +2732,58 @@ export default function App() {
                     marginBottom: 12,
                   }}
                 />
+                <label style={lbl}>Date context (required before AI — avoids wrong year on bank screenshots)</label>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Year for rows without a year in OCR</div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={ocrDateYear}
+                      onChange={(e) => setOcrDateYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="2026"
+                      style={{ ...inp, width: "100%", minHeight: 44 }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Month (optional, 01–12)</div>
+                    <select
+                      value={ocrDateMonth}
+                      onChange={(e) => setOcrDateMonth(e.target.value)}
+                      style={{ ...inp, width: "100%", minHeight: 44 }}
+                    >
+                      <option value="">— Not set —</option>
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const mm = String(i + 1).padStart(2, "0");
+                        return (
+                          <option key={mm} value={mm}>
+                            {mm}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+                {ocrTextLooksMissingFourDigitYear(ocrCsvText) ? (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: T.warn,
+                      marginBottom: 10,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    No 4-digit year found in the text above — confirm the year on the left before converting.
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   disabled={ocrCsvBusy || ocrCsvTessBusy}

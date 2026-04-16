@@ -231,11 +231,11 @@ export function parseExpenseCsv(csvText, catalogLists) {
           incomeExcluded = true;
         }
       } else {
+        // Single "amount" column: many banks use negative = debit (expense) and positive = credit.
+        // Use magnitude; do not treat a bare negative number as income.
         const signed = parseAmountSigned(singleAmtStr);
-        if (Number.isFinite(signed) && signed < 0) {
-          incomeExcluded = true;
-        } else if (Number.isFinite(signed) && signed > 0) {
-          amount = signed;
+        if (Number.isFinite(signed) && signed !== 0) {
+          amount = Math.abs(signed);
         }
       }
     }

@@ -38,7 +38,10 @@ export const fDate = (s, loc) => {
 export const filterTx = (txs, f, cs, ce) => {
   const now = new Date();
   return txs.filter((tx) => {
-    const d = new Date(tx.date + "T00:00:00");
+    const raw = tx.date && String(tx.date).trim();
+    if (!raw) return false;
+    const d = new Date(`${raw}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return false;
     if (f === "today") return tx.date === tdStr();
     if (f === "week") {
       const wa = new Date(now);

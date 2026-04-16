@@ -563,8 +563,7 @@ export async function convertBillToCsvRobust(ocrText, imageDataUrl, { categories
   let followAccum = [];
 
   const forcedYear = dateContext?.year || String(new Date().getFullYear());
-  const sourceHasNoYear = ocrTextLooksMissingFourDigitYear(trimmed);
-  const applyYearFix = (csv) => (sourceHasNoYear ? forceCorrectYearInCsv(csv, forcedYear) : csv);
+  const applyYearFix = (csv) => forceCorrectYearInCsv(csv, forcedYear);
 
   if (trimmed.length) {
     const structured = await convertOcrToCsvStructured(trimmed, { categories, payments, dateContext });

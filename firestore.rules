@@ -29,10 +29,12 @@ service cloud.firestore {
 
       // Narrow rule for a slave paying back: lets them update *only* their own slot in
       // the `settlements` map on someone else's transaction. Keyed by their Firebase uid
-      // so nobody can overwrite another peer's settlement record.
+      // so nobody can overwrite another peer's settlement record. Also allows clearing
+      // their own slot (via deleteField) — `affectedKeys()` covers both add and remove,
+      // and `get('settlements', {})` protects against the map being absent on either side.
       function isPeerSettlementUpdate() {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settlements'])
-          && request.resource.data.settlements
+          && request.resource.data.get('settlements', {})
                .diff(resource.data.get('settlements', {}))
                .affectedKeys().hasOnly([request.auth.uid]);
       }

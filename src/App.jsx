@@ -353,6 +353,8 @@ export default function App({ onReady }) {
   const mirrorAmountRef = useRef({});
   /** Tracks last-known metadata for each mirror (category/notes) so deletion notifications can name the bill. */
   const mirrorMetaRef = useRef({});
+  /** Tracks last-known settlement state on the MASTER's own tx docs so we can notify the master when a peer settles (or un-settles). Keyed by txId → { [peerUid]: amount }. */
+  const peerSettlementsRef = useRef({});
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -506,6 +508,7 @@ export default function App({ onReady }) {
       uidRef.current = null;
       setProfileTagUuid("");
       seenTxIdsRef.current = null;
+      peerSettlementsRef.current = {};
       notifiedMirrorIdsRef.current = new Set();
       mirrorAmountRef.current = {};
       mirrorMetaRef.current = {};
@@ -626,7 +629,76 @@ export default function App({ onReady }) {
                 typeof tx.syncedFromUid === "string" &&
                 tx.syncedFromUid.trim() &&
                 tx.syncedFromUid !== uidRef.current;
-              if (!isMirror) continue;
+
+              /* Master-side: a peer just updated/cleared their slot in
+               * `settlements` on a bill I paid for. Diff against last-known
+               * peer settlements for this tx so we surface a single toast per
+               * real change (not just every snapshot). */
+              if (!isMirror) {
+                const curMap = (tx && tx.settlements && typeof tx.settlements === "object") ? tx.settlements : {};
+                const prevMap = peerSettlementsRef.current[tx.id] || {};
+                const allKeys = new Set([...Object.keys(curMap), ...Object.keys(prevMap)]);
+                const merchant = (typeof tx.notes === "string" && tx.notes.trim()) || tx.category || "Expense";
+                for (const peerUid of allKeys) {
+                  if (peerUid === uidRef.current) continue; // never notify myself
+                  const curEntry = curMap[peerUid] || null;
+                  const prevEntry = prevMap[peerUid] || null;
+                  const curAmt = Number(curEntry?.amount) || 0;
+                  const prevAmt = Number(prevEntry?.amount) || 0;
+                  if (curAmt === prevAmt && Boolean(curEntry) === Boolean(prevEntry)) continue;
+
+                  const peerName = (curEntry?.byName || prevEntry?.byName || "").trim() || "A friend";
+                  if (!prevEntry && curEntry) {
+                    const body = `${peerName} paid you ${formatMoneyRef.current(curAmt)} for ${merchant}`;
+                    dlg.toast(body, {
+                      type: "success",
+                      title: curEntry.full ? "Fully settled by peer" : "Settlement received",
+                      duration: 6000,
+                      actionLabel: "View",
+                      onClick: () => { setSelectedTx(tx); setTab("home"); },
+                    });
+                    try {
+                      if ("Notification" in window) {
+                        if (Notification.permission === "default") void Notification.requestPermission();
+                        if (Notification.permission === "granted") {
+                          const n = new Notification("Settlement received 💰", {
+                            body, tag: `settle-in-${tx.id}-${peerUid}`, icon: "/favicon.ico",
+                          });
+                          n.onclick = () => { try { window.focus(); } catch { /* ignore */ } setSelectedTx(tx); setTab("home"); };
+                        }
+                      }
+                      if ("vibrate" in navigator) navigator.vibrate([60, 40, 120]);
+                    } catch { /* ignore */ }
+                  } else if (prevEntry && !curEntry) {
+                    const body = `${peerName} removed their ${formatMoneyRef.current(prevAmt)} settlement on ${merchant}`;
+                    dlg.toast(body, {
+                      type: "warn",
+                      title: "Settlement reversed",
+                      duration: 6000,
+                    });
+                    try {
+                      if ("Notification" in window && Notification.permission === "granted") {
+                        const n = new Notification("Settlement reversed", { body, tag: `settle-rev-${tx.id}-${peerUid}`, icon: "/favicon.ico" });
+                        n.onclick = () => { try { window.focus(); } catch { /* ignore */ } };
+                      }
+                      if ("vibrate" in navigator) navigator.vibrate([140, 60, 60]);
+                    } catch { /* ignore */ }
+                  } else if (prevEntry && curEntry && curAmt !== prevAmt) {
+                    const body = `${peerName} updated settlement to ${formatMoneyRef.current(curAmt)} on ${merchant}`;
+                    dlg.toast(body, {
+                      type: "info",
+                      title: "Settlement updated",
+                      duration: 5000,
+                      actionLabel: "View",
+                      onClick: () => { setSelectedTx(tx); setTab("home"); },
+                    });
+                  }
+                }
+                peerSettlementsRef.current[tx.id] = { ...curMap };
+                continue;
+              }
+
+
 
               const selfUuid = profileTagUuidRef.current || "";
               const selfEntry = Array.isArray(tx?.split?.people)
@@ -735,6 +807,10 @@ export default function App({ onReady }) {
                   notes: tx.notes || "",
                   amount: Number(tx.amount) || 0,
                 };
+              } else if (tx.settlements && typeof tx.settlements === "object") {
+                /* Seed peer-settlement baseline for our own (master) bills so a
+                 * fresh login doesn't replay historical settlements as toasts. */
+                peerSettlementsRef.current[tx.id] = { ...tx.settlements };
               }
             }
           }
@@ -1000,6 +1076,73 @@ export default function App({ onReady }) {
         console.error("saveSettlement failed:", e);
         notifyOp("Couldn't save settlement", "Check your connection and try again.", { type: "error", duration: 5000 });
       }
+    }
+  }
+
+  /**
+   * Slave clears (removes) their own settlement. Wipes `settlement` off the
+   * slave's mirror and the peer's slot from the master's `settlements` map so
+   * both sides revert to "unsettled" and the bill returns to the master's
+   * total. Firestore rules permit deleting ONLY the caller's own slot on the
+   * master tx (via `isPeerSettlementUpdate` + dotted deleteField).
+   */
+  async function clearSettlement(txId) {
+    if (!txId) return;
+    const tx = txs.find((t) => t.id === txId) || selectedTx;
+    if (!tx) return;
+    const hadSettlement = Boolean(tx.settlement);
+    setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, settlement: null } : t)));
+    setSelectedTx((st) => (st && st.id === txId ? { ...st, settlement: null } : st));
+    if (!uidRef.current) return;
+    const masterUid =
+      typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== uidRef.current
+        ? tx.syncedFromUid
+        : null;
+    try {
+      try {
+        await updateDoc(
+          doc(db, "users", uidRef.current, "transactions", txId),
+          { settlement: deleteField() }
+        );
+      } catch (innerErr) {
+        console.warn("clearSettlement: slave mirror update failed, retrying as setDoc", innerErr);
+        await setDoc(
+          doc(db, "users", uidRef.current, "transactions", txId),
+          sanitizeForFirestore({ settlement: null }),
+          { merge: true }
+        );
+      }
+
+      if (masterUid) {
+        try {
+          await updateDoc(
+            doc(db, "users", masterUid, "transactions", txId),
+            { [`settlements.${uidRef.current}`]: deleteField() }
+          );
+        } catch (masterErr) {
+          console.warn("clearSettlement: master settlement removal failed:", masterErr);
+          if (
+            masterErr?.code === "permission-denied" ||
+            String(masterErr?.message || "").includes("insufficient permissions")
+          ) {
+            dlg.toast(
+              "Settlement cleared on your side, but the payer still sees it until Firestore rules are updated.",
+              { type: "warn", duration: 7000, title: "Rules need updating" }
+            );
+          }
+        }
+      }
+
+      if (hadSettlement) {
+        notifyOp("Settlement removed", "This bill is back on your balance.", {
+          type: "info",
+          tag: `settle-clear-${txId}`,
+          duration: 3500,
+        });
+      }
+    } catch (e) {
+      console.error("clearSettlement failed:", e);
+      notifyOp("Couldn't remove settlement", "Check your connection and try again.", { type: "error", duration: 5000 });
     }
   }
 
@@ -6392,6 +6535,7 @@ export default function App({ onReady }) {
         onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
         onEdit={(txId, updates) => void editTransaction(txId, updates)}
         onSettle={(txId, settlement) => void saveSettlement(txId, settlement)}
+        onClearSettlement={(txId) => void clearSettlement(txId)}
         onClose={() => setSelectedTx(null)}
         onDelete={(id) => {
           delTx(id);

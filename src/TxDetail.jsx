@@ -16,6 +16,7 @@ export function TxDetail({
   onDelete,
   onEdit,
   onSettle,
+  onClearSettlement,
   splitContacts = [],
   onSaveSplit,
   selfProfileUuid = "",
@@ -622,22 +623,47 @@ export function TxDetail({
               <div style={{ padding: "0 16px 8px" }}>
                 {isSettled && !settleOpen ? (
                   <div style={{ background: `${T.grn || "#22c55e"}10`, border: `1px solid ${T.grn || "#22c55e"}44`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                         <BadgeCheck size={18} color={T.grn || "#22c55e"} />
-                        <div>
+                        <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: T.grn || "#22c55e" }}>
                             {settlement.full ? "Fully Settled" : "Partially Settled"}
                           </div>
-                          <div style={{ fontSize: 11, color: T.sub }}>
+                          <div style={{ fontSize: 11, color: T.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {formatMoney(settlement.amount)} · {settlement.method} · {fDate(settlement.settledAt?.slice?.(0,10) || settlement.settledAt, dateLocale)}
                           </div>
                         </div>
                       </div>
-                      <button type="button" onClick={openSettle}
-                        style={{ background: "none", border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 8 }}>
-                        Update
-                      </button>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        <button type="button" onClick={openSettle}
+                          style={{ background: "none", border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 8 }}>
+                          Update
+                        </button>
+                        {onClearSettlement ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const ok = await dlg.confirm(
+                                `This will undo the ${formatMoney(settlement.amount)} settlement and put this bill back on your balance. The payer will be notified.`,
+                                {
+                                  title: "Remove settlement?",
+                                  confirmLabel: "Remove",
+                                  cancelLabel: "Keep",
+                                  danger: true,
+                                  type: "warn",
+                                }
+                              );
+                              if (ok) onClearSettlement(tx.id);
+                            }}
+                            title="Remove settlement"
+                            aria-label="Remove settlement"
+                            style={{ background: "none", border: `1px solid ${T.dng}55`, color: T.dng, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 8, display: "inline-flex", alignItems: "center", gap: 4 }}
+                          >
+                            <Trash2 size={12} /> Remove
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ) : null}

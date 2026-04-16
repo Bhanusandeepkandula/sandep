@@ -5,7 +5,7 @@
 
 const OPENAI_KEY = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
-const SYSTEM_PROMPT = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract every expense/transaction and return ONLY a CSV string.
+const SYSTEM_PROMPT = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
 
 CSV format (include this exact header line):
 date,amount,category,payment,notes,tags
@@ -15,13 +15,16 @@ Column rules:
 - amount: positive number only, no currency symbols or commas.
 - category: pick the closest match from the provided Categories list. If nothing fits, use the first category.
 - payment: pick the closest match from the provided Payments list. If nothing fits, use the first payment.
-- notes: merchant name or short description (max 60 chars).
+- notes: merchant/restaurant name or short description (max 60 chars). For receipts, use the business name.
 - tags: optional comma-separated keywords (leave empty if unsure).
+
+Amount rules — IMPORTANT:
+- For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual items.
+- For a bank statement or transaction list with multiple separate transactions: output one row per transaction.
+- Always prefer GRAND TOTAL > TOTAL > subtotal. Ignore taxes, service charges, discounts listed separately — they are already included in the grand total.
 
 Output rules:
 - Return ONLY the CSV text. No markdown, no explanation, no code fences.
-- One row per expense/line-item. If the receipt is a single purchase, output one row.
-- Skip header/footer lines like totals, taxes, subtotals — only output individual items or the grand total if no line items.
 - Use double-quotes around any field that contains a comma.`;
 
 /**

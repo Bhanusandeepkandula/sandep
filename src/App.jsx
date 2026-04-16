@@ -1261,6 +1261,124 @@ export default function App({ onReady }) {
     return m;
   }, [monthTxs, profileTagUuid, selfFbUid]);
 
+  /**
+   * Aggregate split-bill activity for the current filter range.
+   *
+   * Per-peer balances net the owner / mirror relationship:
+   *   - `theyOweYou`  — their unsettled share of bills YOU paid up front
+   *   - `youOweThem`  — your unsettled share of bills THEY paid up front
+   *   - `settledByThem` / `settledByYou` — what has already been paid back
+   *
+   * We key peers by their Firebase uid where available, falling back to name so
+   * manually-added contacts (no fuid) still roll up cleanly. Settlement records
+   * live on master's tx (`settlements[fuid]`) and slave's mirror (`settlement`) —
+   * we combine both views so the totals are consistent from either side.
+   */
+  const FRIEND_COLORS = useMemo(
+    () => ["#60A5FA", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6", "#22D3EE", "#FB923C", "#EF4444", "#10B981", "#94A3B8"],
+    []
+  );
+  const splitAnalytics = useMemo(() => {
+    const peerMap = new Map();
+    const catMap = new Map();
+    const friendMap = new Map();
+    let outstandingToYou = 0;
+    let outstandingFromYou = 0;
+    let settledToYou = 0;
+    let settledFromYou = 0;
+    let splitCount = 0;
+    let splitTotalValue = 0;
+
+    const splitTxs = filtered.filter((tx) => tx?.split?.people?.length);
+
+    for (const tx of splitTxs) {
+      splitCount += 1;
+      splitTotalValue += parseFloat(String(tx.amount)) || 0;
+      const txMirror =
+        typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== selfFbUid;
+
+      if (txMirror) {
+        const selfEntry = tx.split.people.find(
+          (p) => (p?.fuid && p.fuid === selfFbUid) || (p?.u && p.u === profileTagUuid)
+        );
+        const share = selfEntry ? (parseFloat(String(selfEntry.a)) || 0) : 0;
+        const settledByMe = parseFloat(String(tx.settlement?.amount)) || 0;
+        const owed = Math.max(0, share - settledByMe);
+        const masterUid = tx.syncedFromUid;
+        const masterKey = `uid:${masterUid}`;
+        const masterName = (people || []).find((c) => c.fuid === masterUid)?.n || "Payer";
+
+        if (!peerMap.has(masterKey)) {
+          peerMap.set(masterKey, {
+            key: masterKey, name: masterName,
+            theyOweYou: 0, youOweThem: 0, settledByThem: 0, settledByYou: 0, splitCount: 0,
+          });
+        }
+        const entry = peerMap.get(masterKey);
+        entry.youOweThem += owed;
+        entry.settledByYou += settledByMe;
+        entry.splitCount += 1;
+
+        outstandingFromYou += owed;
+        settledFromYou += settledByMe;
+        catMap.set(tx.category || "Other", (catMap.get(tx.category || "Other") || 0) + share);
+        friendMap.set(masterName, (friendMap.get(masterName) || 0) + share);
+      } else {
+        for (const p of tx.split.people) {
+          const peerKey = p?.fuid ? `uid:${p.fuid}` : `name:${String(p?.n || "").trim().toLowerCase()}`;
+          const peerShare = parseFloat(String(p?.a)) || 0;
+          const settlement = tx.settlements && p?.fuid ? tx.settlements[p.fuid] : null;
+          const settledByPeer = parseFloat(String(settlement?.amount)) || 0;
+          const owed = Math.max(0, peerShare - settledByPeer);
+
+          if (!peerMap.has(peerKey)) {
+            peerMap.set(peerKey, {
+              key: peerKey, name: p?.n || "Peer",
+              theyOweYou: 0, youOweThem: 0, settledByThem: 0, settledByYou: 0, splitCount: 0,
+            });
+          }
+          const entry = peerMap.get(peerKey);
+          entry.theyOweYou += owed;
+          entry.settledByThem += settledByPeer;
+          entry.splitCount += 1;
+
+          outstandingToYou += owed;
+          settledToYou += settledByPeer;
+          catMap.set(tx.category || "Other", (catMap.get(tx.category || "Other") || 0) + peerShare);
+          friendMap.set(p?.n || "Peer", (friendMap.get(p?.n || "Peer") || 0) + peerShare);
+        }
+      }
+    }
+
+    const byCategory = [...catMap.entries()]
+      .map(([name, value]) => {
+        const cat = getCat(categories, name);
+        return { name, value, c: cat.c };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    const byFriend = [...friendMap.entries()]
+      .map(([name, value], i) => ({ name, value, c: FRIEND_COLORS[i % FRIEND_COLORS.length] }))
+      .sort((a, b) => b.value - a.value);
+
+    const peers = [...peerMap.values()]
+      .map((p) => ({ ...p, net: p.theyOweYou - p.youOweThem }))
+      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+
+    return {
+      splitCount,
+      splitTotalValue,
+      outstandingToYou,
+      outstandingFromYou,
+      settledToYou,
+      settledFromYou,
+      netPosition: outstandingToYou - outstandingFromYou,
+      byCategory,
+      byFriend,
+      peers,
+    };
+  }, [filtered, selfFbUid, profileTagUuid, people, categories, FRIEND_COLORS]);
+
   /** Budgets tab: over-limit first, then by % used (desc), then name. */
   const budgetEntriesSorted = useMemo(() => {
     return Object.entries(budgets)
@@ -2251,6 +2369,29 @@ export default function App({ onReady }) {
       .map((t) => ({ amount: t._eff, cat: t.category, notes: t.notes, date: t.date }));
 
     const currency = currencyCode || "INR";
+
+    /* Condensed split snapshot — gives the model enough signal to reason about
+     * friend balances, recoverability risk and category skew without flooding
+     * the prompt with full tx dumps. */
+    const splitSnapshot = splitAnalytics.splitCount > 0 ? {
+      billCount: splitAnalytics.splitCount,
+      totalBillValue: Math.round(splitAnalytics.splitTotalValue),
+      outstandingTheyOweYou: Math.round(splitAnalytics.outstandingToYou),
+      outstandingYouOweThem: Math.round(splitAnalytics.outstandingFromYou),
+      alreadyRecovered: Math.round(splitAnalytics.settledToYou),
+      alreadyPaidBack: Math.round(splitAnalytics.settledFromYou),
+      netPosition: Math.round(splitAnalytics.netPosition),
+      topPeers: splitAnalytics.peers.slice(0, 5).map((p) => ({
+        name: p.name,
+        net: Math.round(p.net),
+        bills: p.splitCount,
+        theyOweYou: Math.round(p.theyOweYou),
+        youOweThem: Math.round(p.youOweThem),
+      })),
+      topFriendsByVolume: splitAnalytics.byFriend.slice(0, 5).map((f) => ({ name: f.name, value: Math.round(f.value) })),
+      topCategoriesByVolume: splitAnalytics.byCategory.slice(0, 5).map((c) => ({ name: c.name, value: Math.round(c.value) })),
+    } : null;
+
     const summary = {
       currency,
       period: "current month",
@@ -2267,6 +2408,7 @@ export default function App({ onReady }) {
       overBudgetCategories: budgetStatus.filter((b) => b.pct > 100).map((b) => b.cat),
       nearLimitCategories: budgetStatus.filter((b) => b.pct >= 80 && b.pct <= 100).map((b) => b.cat),
       top10Transactions: topTx,
+      splits: splitSnapshot,
     };
 
     try {
@@ -2286,6 +2428,7 @@ export default function App({ onReady }) {
               content:
                 `You are a personal finance advisor. Analyse the user's REAL spending data and return ONLY a JSON array of exactly 5 personalised insights. ` +
                 `Each insight must reference actual numbers from the data. ` +
+                `If \`splits\` is present, at least one insight MUST address shared-bill dynamics (outstanding balances, recovery from friends, or repeated split categories). ` +
                 `Format: [{icon:string(single emoji),title:string(max 8 words),desc:string(1-2 sentences, mention real amounts in ${currency}),saving:string(estimated saving e.g. "${currency} 500/month"),priority:"high"|"medium"|"low"}]` +
                 `. Return ONLY the JSON array — no markdown, no explanation.`,
             },
@@ -4425,6 +4568,207 @@ export default function App({ onReady }) {
               </div>
             )}
 
+            {/* ═══════════════════ SPLITS ANALYTICS ═══════════════════ */}
+            {splitAnalytics.splitCount > 0 && (
+              <>
+                <div style={{ margin: `20px ${px}px 10px`, display: "flex", alignItems: "center", gap: 8 }}>
+                  <Users size={16} color={T.acc} />
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>Splits</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>
+                    {splitAnalytics.splitCount} {splitAnalytics.splitCount === 1 ? "bill" : "bills"} · {formatMoney(splitAnalytics.splitTotalValue)} total
+                  </div>
+                </div>
+
+                {/* Stat row: who owes whom + net position */}
+                <div style={{
+                  margin: `0 ${px}px 14px`,
+                  display: "grid",
+                  gridTemplateColumns: twoCol ? "repeat(4, 1fr)" : "1fr 1fr",
+                  gap: 10,
+                }}>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.grn || "#22c55e"}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Owed to you</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.grn || "#22c55e" }}>
+                      {formatMoney(splitAnalytics.outstandingToYou)}
+                    </div>
+                    {splitAnalytics.settledToYou > 0 ? (
+                      <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                        Recovered {formatMoney(splitAnalytics.settledToYou)}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.dng}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>You owe</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.dng }}>
+                      {formatMoney(splitAnalytics.outstandingFromYou)}
+                    </div>
+                    {splitAnalytics.settledFromYou > 0 ? (
+                      <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                        Paid back {formatMoney(splitAnalytics.settledFromYou)}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${splitAnalytics.netPosition >= 0 ? T.grn || "#22c55e" : T.warn}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Net position</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: splitAnalytics.netPosition >= 0 ? T.grn || "#22c55e" : T.warn }}>
+                      {splitAnalytics.netPosition >= 0 ? "+" : ""}{formatMoney(splitAnalytics.netPosition)}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                      {splitAnalytics.netPosition >= 0 ? "In your favour" : "You're behind"}
+                    </div>
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.acc}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Active peers</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.acc }}>
+                      {splitAnalytics.peers.length}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                      {splitAnalytics.peers.filter((p) => Math.abs(p.net) > 0.005).length} with balance
+                    </div>
+                  </div>
+                </div>
+
+                {/* Two-up: split by friend + split by category */}
+                {(splitAnalytics.byFriend.length > 0 || splitAnalytics.byCategory.length > 0) && (
+                  <div style={{
+                    margin: `0 ${px}px 14px`,
+                    display: "grid",
+                    gridTemplateColumns: twoCol ? "1fr 1fr" : "1fr",
+                    gap: 14,
+                  }}>
+                    {splitAnalytics.byFriend.length > 0 && (
+                      <div style={{ ...card, margin: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Split by Friend</div>
+                        <ResponsiveContainer width="100%" height={chart.pie}>
+                          <PieChart>
+                            <Pie
+                              data={splitAnalytics.byFriend}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={3}
+                              dataKey="value"
+                              stroke="none"
+                            >
+                              {splitAnalytics.byFriend.map((e, i) => (
+                                <Cell key={i} fill={e.c} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v) => [formatMoney(v)]}
+                              contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                          {splitAnalytics.byFriend.slice(0, 8).map((b, i) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                                <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                              </div>
+                              <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {splitAnalytics.byCategory.length > 0 && (
+                      <div style={{ ...card, margin: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Split by Category</div>
+                        <ResponsiveContainer width="100%" height={chart.pie}>
+                          <PieChart>
+                            <Pie
+                              data={splitAnalytics.byCategory}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={3}
+                              dataKey="value"
+                              stroke="none"
+                            >
+                              {splitAnalytics.byCategory.map((e, i) => (
+                                <Cell key={i} fill={e.c} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v) => [formatMoney(v)]}
+                              contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                          {splitAnalytics.byCategory.slice(0, 8).map((b, i) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                                <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  <CategoryIcon name={b.name} size={12} color={b.c} /> {b.name}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Per-peer balances */}
+                {splitAnalytics.peers.length > 0 && (
+                  <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Balances by Peer</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {splitAnalytics.peers.slice(0, 10).map((p) => {
+                        const net = p.net;
+                        const color = Math.abs(net) < 0.005 ? T.sub : net > 0 ? (T.grn || "#22c55e") : T.dng;
+                        const label = Math.abs(net) < 0.005 ? "settled" : net > 0 ? "owes you" : "you owe";
+                        return (
+                          <div key={p.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.bdr}` }}>
+                            <div style={{ width: 32, height: 32, borderRadius: 10, background: T.card2, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <Users size={15} color={T.sub} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {p.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>
+                                {p.splitCount} {p.splitCount === 1 ? "bill" : "bills"}
+                                {p.settledByThem > 0 ? <> · received {formatMoney(p.settledByThem)}</> : null}
+                                {p.settledByYou > 0 ? <> · paid {formatMoney(p.settledByYou)}</> : null}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 800, color }}>
+                                {net > 0 ? "+" : net < 0 ? "-" : ""}{formatMoney(Math.abs(net))}
+                              </div>
+                              <div style={{ fontSize: 10, color: T.sub, marginTop: 1 }}>{label}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTab("reports")}
+                      style={{
+                        marginTop: 10, width: "100%", padding: 10, borderRadius: 10,
+                        border: `1px solid ${T.purp}`, background: T.pdim, color: T.purp,
+                        fontSize: 12, fontWeight: 700, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}
+                    >
+                      <Sparkles size={13} /> Use in AI Report
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
           </div>
         )}
 
@@ -4479,6 +4823,7 @@ export default function App({ onReady }) {
                 uid={uidRef.current}
                 reportFreq={reportFreq}
                 px={px}
+                splitAnalytics={splitAnalytics}
               />
             )}
 

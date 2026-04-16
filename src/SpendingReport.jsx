@@ -196,6 +196,7 @@ export function SpendingReport({
   uid,
   reportFreq = "weekly",
   px = 20,
+  splitAnalytics = null,
 }) {
   const [report, setReport] = useState(() => loadCachedReport(uid));
   const [loading, setLoading] = useState(false);
@@ -242,6 +243,24 @@ export function SpendingReport({
     setLoading(true);
 
     const currency = currencyCode || "INR";
+    /* Condensed split bill snapshot fed to the report model so recommendations
+     * can cover peer balances and unrecovered money alongside category spend. */
+    const splitSnapshot = splitAnalytics && splitAnalytics.splitCount > 0 ? {
+      billCount: splitAnalytics.splitCount,
+      totalBillValue: Math.round(splitAnalytics.splitTotalValue),
+      outstandingTheyOweYou: Math.round(splitAnalytics.outstandingToYou),
+      outstandingYouOweThem: Math.round(splitAnalytics.outstandingFromYou),
+      alreadyRecovered: Math.round(splitAnalytics.settledToYou),
+      alreadyPaidBack: Math.round(splitAnalytics.settledFromYou),
+      netPosition: Math.round(splitAnalytics.netPosition),
+      topPeers: splitAnalytics.peers.slice(0, 5).map((p) => ({
+        name: p.name,
+        net: Math.round(p.net),
+        bills: p.splitCount,
+      })),
+      topCategoriesByVolume: splitAnalytics.byCategory.slice(0, 5).map((c) => ({ name: c.name, value: Math.round(c.value) })),
+    } : null;
+
     const data = {
       currency,
       weekly: {
@@ -265,6 +284,7 @@ export function SpendingReport({
       })),
       fixedMonthlyExpenses: fixedTotal,
       overallCap: monthlyBudgetTotal,
+      splits: splitSnapshot,
     };
 
     try {
@@ -288,7 +308,10 @@ export function SpendingReport({
                 `"positives": ["array of 1-3 short positive findings"], ` +
                 `"recommendations": ["array of 2-4 actionable recommendations with specific amounts"], ` +
                 `"score": number 1-100 representing overall financial health this period}` +
-                ` Use real amounts from the data. No markdown, no explanation, ONLY the JSON object.`,
+                ` When \`splits\` is present, at least one alert / recommendation MUST address shared-bill balances ` +
+                `(e.g. "chase {name} for ${currency} X owed", "settle ${currency} Y with {name} this week", ` +
+                `or call out recurring split categories). ` +
+                `Use real amounts from the data. No markdown, no explanation, ONLY the JSON object.`,
             },
             { role: "user", content: `Spending data:\n${JSON.stringify(data, null, 2)}` },
           ],
@@ -315,7 +338,7 @@ export function SpendingReport({
     } finally {
       setLoading(false);
     }
-  }, [txs, weekly, monthly, budgets, catSpent, fixedTotal, monthlyBudgetTotal, currencyCode, uid]);
+  }, [txs, weekly, monthly, budgets, catSpent, fixedTotal, monthlyBudgetTotal, currencyCode, uid, splitAnalytics]);
 
   useEffect(() => {
     if (txs.length > 0 && shouldAutoGenerate(uid, reportFreq)) {

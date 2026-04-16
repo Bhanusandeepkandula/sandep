@@ -936,18 +936,56 @@ export default function App({ onReady }) {
     setShowSplitScan(false);
   }
 
-  /** Slave records a settlement against their mirror copy. */
+  /**
+   * Slave records a settlement against their mirror copy AND pushes it to the master's
+   * original transaction under `settlements[slaveUid]` so the master's spending drops by
+   * the paid-back amount automatically. Both writes go through in parallel — if the
+   * master-side write fails (e.g. rules not yet deployed), the slave's local ledger still
+   * updates correctly.
+   */
   async function saveSettlement(txId, settlement) {
     if (!txId || !settlement) return;
     setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, settlement } : t)));
     setSelectedTx((st) => (st && st.id === txId ? { ...st, settlement } : st));
     if (uidRef.current) {
+      const tx = txs.find((t) => t.id === txId) || selectedTx;
+      const masterUid =
+        tx && typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== uidRef.current
+          ? tx.syncedFromUid
+          : null;
       try {
         await setDoc(
           doc(db, "users", uidRef.current, "transactions", txId),
           sanitizeForFirestore({ settlement }),
           { merge: true }
         );
+
+        if (masterUid) {
+          const entry = {
+            ...settlement,
+            byUid: uidRef.current,
+            byName: profileName || "",
+          };
+          try {
+            await setDoc(
+              doc(db, "users", masterUid, "transactions", txId),
+              { settlements: { [uidRef.current]: sanitizeForFirestore(entry) } },
+              { merge: true }
+            );
+          } catch (masterErr) {
+            console.warn("saveSettlement: master push failed (rules?):", masterErr);
+            if (
+              masterErr?.code === "permission-denied" ||
+              String(masterErr?.message || "").includes("insufficient permissions")
+            ) {
+              dlg.toast(
+                "Your settlement is saved, but the payer won't see it until Firestore rules are updated.",
+                { type: "warn", duration: 7000, title: "Rules need updating" }
+              );
+            }
+          }
+        }
+
         const amt = Number(settlement.amount) || 0;
         notifyOp(
           settlement.full ? "Fully settled" : "Partial settlement saved",
@@ -1143,14 +1181,15 @@ export default function App({ onReady }) {
     if (first) setForm((p) => ({ ...p, category: first }));
   }, [tab, step, categories, form.category, scanMissingFieldKeys]);
 
+  const selfFbUid = firebaseUser?.uid || "";
   const filtered = useMemo(() => filterTx(txs, df, cS, cE), [txs, df, cS, cE]);
-  const fTotal = useMemo(() => tot(filtered, profileTagUuid), [filtered, profileTagUuid]);
+  const fTotal = useMemo(() => tot(filtered, profileTagUuid, selfFbUid), [filtered, profileTagUuid, selfFbUid]);
   const monthTxs = useMemo(() => filterTx(txs, "month"), [txs]);
-  const monthTotal = useMemo(() => tot(monthTxs, profileTagUuid), [monthTxs, profileTagUuid]);
+  const monthTotal = useMemo(() => tot(monthTxs, profileTagUuid, selfFbUid), [monthTxs, profileTagUuid, selfFbUid]);
   const todayTxs = useMemo(() => txs.filter((t) => t.date === tdStr()), [txs]);
-  const todayTotal = useMemo(() => tot(todayTxs, profileTagUuid), [todayTxs, profileTagUuid]);
+  const todayTotal = useMemo(() => tot(todayTxs, profileTagUuid, selfFbUid), [todayTxs, profileTagUuid, selfFbUid]);
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
-  const weekTotal = useMemo(() => tot(weekTxs, profileTagUuid), [weekTxs, profileTagUuid]);
+  const weekTotal = useMemo(() => tot(weekTxs, profileTagUuid, selfFbUid), [weekTxs, profileTagUuid, selfFbUid]);
 
   /** Human label for the calendar month used by "This Month" (same rule as `filterTx(..., "month")`). */
   const calendarMonthLabel = useMemo(() => {
@@ -1184,24 +1223,24 @@ export default function App({ onReady }) {
   const breakdown = useMemo(() => {
     const m = {};
     filtered.forEach((tx) => {
-      m[tx.category] = (m[tx.category] || 0) + effectiveAmount(tx, profileTagUuid);
+      m[tx.category] = (m[tx.category] || 0) + effectiveAmount(tx, profileTagUuid, selfFbUid);
     });
     return Object.entries(m)
       .map(([n, v]) => ({ name: n, value: v, ...getCat(categories, n) }))
       .sort((a, b) => b.value - a.value);
-  }, [filtered, categories, profileTagUuid]);
+  }, [filtered, categories, profileTagUuid, selfFbUid]);
 
   const PAY_COLORS = ["#60A5FA", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6", "#22D3EE", "#FB923C", "#94A3B8"];
   const paymentBreakdown = useMemo(() => {
     const m = {};
     filtered.forEach((tx) => {
       const p = tx.payment || "Unknown";
-      m[p] = (m[p] || 0) + effectiveAmount(tx, profileTagUuid);
+      m[p] = (m[p] || 0) + effectiveAmount(tx, profileTagUuid, selfFbUid);
     });
     return Object.entries(m)
       .map(([name, value], i) => ({ name, value, c: PAY_COLORS[i % PAY_COLORS.length] }))
       .sort((a, b) => b.value - a.value);
-  }, [filtered, profileTagUuid]);
+  }, [filtered, profileTagUuid, selfFbUid]);
 
   const dailyData = useMemo(() => {
     const loc = (dateLocale && String(dateLocale).trim()) || (locale && String(locale).trim()) || undefined;
@@ -1209,18 +1248,18 @@ export default function App({ onReady }) {
       const d = dAgo(13 - i);
       return {
         label: new Date(d + "T00:00:00").toLocaleDateString(loc, { day: "numeric", month: "short" }),
-        amount: tot(txs.filter((t) => t.date === d), profileTagUuid),
+        amount: tot(txs.filter((t) => t.date === d), profileTagUuid, selfFbUid),
       };
     });
-  }, [txs, dateLocale, locale, profileTagUuid]);
+  }, [txs, dateLocale, locale, profileTagUuid, selfFbUid]);
 
   const catSpent = useMemo(() => {
     const m = {};
     monthTxs.forEach((t) => {
-      m[t.category] = (m[t.category] || 0) + effectiveAmount(t, profileTagUuid);
+      m[t.category] = (m[t.category] || 0) + effectiveAmount(t, profileTagUuid, selfFbUid);
     });
     return m;
-  }, [monthTxs, profileTagUuid]);
+  }, [monthTxs, profileTagUuid, selfFbUid]);
 
   /** Budgets tab: over-limit first, then by % used (desc), then name. */
   const budgetEntriesSorted = useMemo(() => {
@@ -2182,7 +2221,7 @@ export default function App({ onReady }) {
     // Payment method breakdown for this month
     const payBreakdown = {};
     monthTxs.forEach((t) => {
-      payBreakdown[t.payment] = (payBreakdown[t.payment] || 0) + effectiveAmount(t, profileTagUuid);
+      payBreakdown[t.payment] = (payBreakdown[t.payment] || 0) + effectiveAmount(t, profileTagUuid, selfFbUid);
     });
 
     // Last 7 days total
@@ -2193,7 +2232,7 @@ export default function App({ onReady }) {
         cutoff.setDate(cutoff.getDate() - 7);
         return d >= cutoff;
       })
-      .reduce((s, t) => s + effectiveAmount(t, profileTagUuid), 0);
+      .reduce((s, t) => s + effectiveAmount(t, profileTagUuid, selfFbUid), 0);
 
     // Budget status per category
     const budgetStatus = Object.entries(budgets).map(([cat, limit]) => ({
@@ -2206,7 +2245,7 @@ export default function App({ onReady }) {
     // Top 10 individual transactions this month (use the slave's own share for mirrors so
     // AI insights don't over-count split bills that the user didn't actually pay in full).
     const topTx = [...monthTxs]
-      .map((t) => ({ ...t, _eff: effectiveAmount(t, profileTagUuid) }))
+      .map((t) => ({ ...t, _eff: effectiveAmount(t, profileTagUuid, selfFbUid) }))
       .sort((a, b) => b._eff - a._eff)
       .slice(0, 10)
       .map((t) => ({ amount: t._eff, cat: t.category, notes: t.notes, date: t.date }));
@@ -2972,6 +3011,7 @@ export default function App({ onReady }) {
                   formatMoney={formatMoney}
                   dateLocale={dateLocale || locale}
                   selfProfileUuid={profileTagUuid || ""}
+                  selfFbUid={selfFbUid}
                 />
               ))}
             </div>
@@ -5790,6 +5830,7 @@ export default function App({ onReady }) {
         dateLocale={dateLocale || locale}
         splitContacts={people}
         selfProfileUuid={profileTagUuid || ""}
+        selfFbUid={selfFbUid}
         selfName={profileName || ""}
         onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
         onEdit={(txId, updates) => void editTransaction(txId, updates)}

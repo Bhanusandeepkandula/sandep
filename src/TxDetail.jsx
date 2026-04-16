@@ -19,6 +19,7 @@ export function TxDetail({
   splitContacts = [],
   onSaveSplit,
   selfProfileUuid = "",
+  selfFbUid = "",
   selfName = "",
 }) {
   const [editing, setEditing] = useState(false);
@@ -77,8 +78,11 @@ export function TxDetail({
   const peopleSafe = Array.isArray(tx.split?.people) ? tx.split.people : [];
 
   /* Mirror view perspective — the slave's own entry in the split list, plus the owner's implied share. */
-  const selfEntry = isMirror && selfProfileUuid
-    ? peopleSafe.find((p) => p && typeof p.u === "string" && p.u === selfProfileUuid)
+  const selfEntry = isMirror
+    ? peopleSafe.find((p) => p && (
+        (selfFbUid && typeof p.fuid === "string" && p.fuid === selfFbUid) ||
+        (selfProfileUuid && typeof p.u === "string" && p.u === selfProfileUuid)
+      ))
     : null;
   const otherPeople = isMirror && selfEntry
     ? peopleSafe.filter((p) => p !== selfEntry)
@@ -96,6 +100,27 @@ export function TxDetail({
 
   const settlement = tx.settlement || null;
   const isSettled = Boolean(settlement);
+
+  /* Master-side aggregate: how much have peers paid back? Used to reduce the
+   * hero amount and to show per-slave "Paid back" rows in the split summary. */
+  const masterSettlementsMap = (!isMirror && tx?.settlements && typeof tx.settlements === "object")
+    ? tx.settlements : null;
+  const masterSettledSum = masterSettlementsMap
+    ? Object.values(masterSettlementsMap).reduce((s, v) => s + (parseFloat(String(v?.amount)) || 0), 0)
+    : 0;
+
+  /* Effective (remaining) amount shown in the hero.
+   *   Slave: share − what I've settled    (→ 0 after full pay-back)
+   *   Master: total − paid back by peers  (drops as slaves settle)
+   */
+  const settledByMe = isMirror ? (parseFloat(String(settlement?.amount)) || 0) : 0;
+  const remainingAmt = isMirror
+    ? Math.max(0, myShare - settledByMe)
+    : Math.max(0, txAmt - masterSettledSum);
+  const isFullySettled = remainingAmt <= 0.005 && (
+    (isMirror && settlement)
+    || (!isMirror && masterSettledSum > 0 && masterSettledSum >= txAmt - 0.005)
+  );
 
   function openSettle() {
     setSettleAmt(String(myShare));
@@ -284,7 +309,27 @@ export function TxDetail({
               <div style={{ width: 56, height: 56, borderRadius: 16, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 8px", border: `2px solid ${cat.c}33` }}>
                 <CategoryIcon name={tx.category} size={26} color={cat.c} />
               </div>
-              <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1 }}>-{formatMoney(tx.amount)}</div>
+              {/* Primary number is the *remaining* amount for whoever's looking — slaves see
+                  what they still owe, master sees unrecovered spend. Full bill stays visible
+                  as a muted sub-line so the original total isn't lost. */}
+              <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1, color: isFullySettled ? (T.grn || "#22c55e") : T.txt }}>
+                -{formatMoney(remainingAmt)}
+              </div>
+              {(isMirror ? (settledByMe > 0) : (masterSettledSum > 0)) ? (
+                <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>
+                  Bill {formatMoney(txAmt)}
+                  {isMirror ? (
+                    <> · your share {formatMoney(myShare)} · settled {formatMoney(settledByMe)}</>
+                  ) : (
+                    <> · recovered {formatMoney(masterSettledSum)}</>
+                  )}
+                </div>
+              ) : null}
+              {isFullySettled ? (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e", background: `${T.grn || "#22c55e"}10`, border: `1px solid ${T.grn || "#22c55e"}44`, borderRadius: 8, padding: "2px 10px", letterSpacing: 0.4 }}>
+                  <BadgeCheck size={12} /> FULLY SETTLED
+                </div>
+              ) : null}
               {tx.notes && <div style={{ fontSize: 14, color: T.sub, marginTop: 4, lineHeight: 1.3 }}>{tx.notes}</div>}
               <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 12, color: cat.c, background: cat.bg, borderRadius: 8, padding: "3px 10px", border: `1px solid ${cat.c}33` }}>
                 <CategoryIcon name={tx.category} size={12} color={cat.c} />
@@ -355,7 +400,16 @@ export function TxDetail({
                         <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
                           <Users size={12} color={T.acc} /> {selfName || "You"}{isMirror ? " (you)" : ""}
                         </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: T.acc }}>{formatMoney(yourShare)}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {isMirror && settledByMe > 0 ? (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e" }}>
+                              -{formatMoney(settledByMe)}
+                            </span>
+                          ) : null}
+                          <span style={{ fontSize: 13, fontWeight: 700, color: T.acc, textDecoration: isMirror && settledByMe >= myShare - 0.005 && settledByMe > 0 ? "line-through" : "none" }}>
+                            {formatMoney(yourShare)}
+                          </span>
+                        </div>
                       </div>
                       {isMirror && ownerImpliedShare > 0 ? (
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -365,11 +419,32 @@ export function TxDetail({
                           <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(ownerImpliedShare)}</span>
                         </div>
                       ) : null}
-                      {otherPeople.map((p, i) => (
+                      {otherPeople.map((p, i) => {
+                        /* Master view: look up whether this peer has paid anything back.
+                         * Peers are keyed by Firebase uid in `tx.settlements`. */
+                        const peerSettlement = !isMirror && masterSettlementsMap && p?.fuid
+                          ? masterSettlementsMap[p.fuid]
+                          : null;
+                        const paidBack = peerSettlement ? (parseFloat(String(peerSettlement.amount)) || 0) : 0;
+                        const owedAmt = (parseFloat(String(p.a)) || 0);
+                        const peerFullySettled = paidBack > 0 && paidBack >= owedAmt - 0.005;
+                        return (
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.sub} /> {p.n}</span>
+                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+                            <Users size={12} color={T.sub} /> {p.n}
+                            {peerFullySettled ? (
+                              <BadgeCheck size={11} color={T.grn || "#22c55e"} />
+                            ) : null}
+                          </span>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(p.a)}</span>
+                            {paidBack > 0 && !peerFullySettled ? (
+                              <span style={{ fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e" }} title={`Paid back ${formatMoney(paidBack)}`}>
+                                -{formatMoney(paidBack)}
+                              </span>
+                            ) : null}
+                            <span style={{ fontSize: 13, fontWeight: 700, textDecoration: peerFullySettled ? "line-through" : "none", color: peerFullySettled ? T.sub : T.txt }}>
+                              {formatMoney(p.a)}
+                            </span>
                             {canEditSplit && (
                               <button type="button"
                                 onClick={() => {
@@ -388,7 +463,8 @@ export function TxDetail({
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

@@ -11,11 +11,16 @@ export function TxRow({
   formatMoney,
   dateLocale,
   selfProfileUuid = "",
+  selfFbUid = "",
 }) {
   const cat = getCat(categories, tx.category);
   const isMirror =
     typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim().length > 0;
-  const displayAmt = effectiveAmount(tx, selfProfileUuid);
+  const displayAmt = effectiveAmount(tx, selfProfileUuid, selfFbUid);
+  const isSettled = displayAmt <= 0 && (
+    Boolean(tx?.settlement) ||
+    (tx?.settlements && typeof tx.settlements === "object" && Object.keys(tx.settlements).length > 0)
+  );
   return (
     <div
       style={{
@@ -113,12 +118,25 @@ export function TxRow({
                 <span style={{ color: T.acc }}>Split</span>
               </>
             )}
+            {isSettled ? (
+              <>
+                <span>·</span>
+                <span style={{ color: T.grn || "#22c55e" }} title="Fully settled">Settled</span>
+              </>
+            ) : null}
           </div>
         </div>
 
         {/* amount + category badge */}
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: T.txt }}>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: isSettled ? T.sub : T.txt,
+              textDecoration: isSettled ? "line-through" : "none",
+            }}
+          >
             -{formatMoney(displayAmt)}
           </div>
           <div

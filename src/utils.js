@@ -59,27 +59,49 @@ function coerceAmount(raw) {
   return Number.isFinite(a) ? a : 0;
 }
 
+/** Sum all slave settlements recorded on a master-owned tx. */
+function sumMasterSettlements(tx) {
+  const s = tx?.settlements;
+  if (!s || typeof s !== "object") return 0;
+  let total = 0;
+  for (const k of Object.keys(s)) total += coerceAmount(s[k]?.amount);
+  return total;
+}
+
 /**
- * Return the amount that actually counts against the current user's ledger.
+ * Return the amount that actually counts against the current user's ledger,
+ * factoring in settlements so spending goes down as bills get paid back.
  *
- * For a mirror (a transaction synced from a split contact), the slave did not pay the full
- * bill — only their share recorded in `split.people[i].a`. We look that entry up by the
- * slave's own profile UUID. If no match is found we fall back to the full amount so old
- * mirrors without a `u` field still display something sensible.
+ *   Slave (mirror): share − settled_by_me         (floors at 0)
+ *   Master (owner): total − sum(slave settlements) (floors at 0)
+ *
+ * When a bill is fully settled this returns 0 so the transaction disappears
+ * from totals, category pies, budget usage, etc. — exactly as if it had been
+ * reimbursed, which it effectively has.
  */
-export function effectiveAmount(tx, selfProfileUuid) {
+export function effectiveAmount(tx, selfProfileUuid, selfFbUid) {
   const full = coerceAmount(tx?.amount);
   const isMirror =
     tx && typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim().length > 0;
-  if (!isMirror) return full;
-  const people = Array.isArray(tx?.split?.people) ? tx.split.people : [];
-  const uuid = String(selfProfileUuid || "").trim();
-  if (!people.length || !uuid) return full;
-  const selfEntry = people.find((p) => typeof p?.u === "string" && p.u === uuid);
-  if (!selfEntry) return full;
-  return coerceAmount(selfEntry.a);
+
+  if (isMirror) {
+    const people = Array.isArray(tx?.split?.people) ? tx.split.people : [];
+    const uuid = String(selfProfileUuid || "").trim();
+    const fbUid = String(selfFbUid || "").trim();
+    let share = full;
+    if (people.length && (uuid || fbUid)) {
+      const selfEntry = people.find(
+        (p) => (fbUid && p?.fuid === fbUid) || (uuid && p?.u === uuid)
+      );
+      if (selfEntry) share = coerceAmount(selfEntry.a);
+    }
+    const settled = coerceAmount(tx?.settlement?.amount);
+    return Math.max(0, share - settled);
+  }
+
+  return Math.max(0, full - sumMasterSettlements(tx));
 }
 
 /** Sum expense amounts; coerces Firestore/string values so totals never break from type drift. */
-export const tot = (txs, selfProfileUuid) =>
-  txs.reduce((s, t) => s + effectiveAmount(t, selfProfileUuid), 0);
+export const tot = (txs, selfProfileUuid, selfFbUid) =>
+  txs.reduce((s, t) => s + effectiveAmount(t, selfProfileUuid, selfFbUid), 0);

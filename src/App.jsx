@@ -1389,13 +1389,10 @@ export default function App() {
       const y = ocrDateYear.trim();
       const yearOk = /^\d{4}$/.test(y) && Number(y) >= 1990 && Number(y) <= 2100;
       const m = ocrDateMonth.trim();
-      const dateContext =
-        yearOk || m
-          ? {
-              ...(yearOk ? { year: y } : {}),
-              ...(m ? { month: m.padStart(2, "0") } : {}),
-            }
-          : undefined;
+      const dateContext = {
+        year: yearOk ? y : String(new Date().getFullYear()),
+        ...(m ? { month: m.padStart(2, "0") } : {}),
+      };
       const { csv, followUpQuestions } = await convertBillToCsvRobust(ocrCsvText, ocrCsvImageDataUrlRef.current, {
         categories: catNames,
         payments: payNames,

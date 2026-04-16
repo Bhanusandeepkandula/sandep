@@ -22,21 +22,18 @@ const OCR_JSON_MAX_CHARS = 24_000;
  * @returns {string} prepended to user messages (empty if no context)
  */
 function buildDateContextBlock(ctx) {
-  if (!ctx || typeof ctx !== "object") return "";
-  const y = ctx.year && String(ctx.year).trim();
-  const m = ctx.month && String(ctx.month).trim();
-  if (!y && !m) return "";
+  const fallbackYear = String(new Date().getFullYear());
+  const y = (ctx && typeof ctx === "object" && ctx.year && String(ctx.year).trim()) || fallbackYear;
+  const m = ctx && typeof ctx === "object" && ctx.month ? String(ctx.month).trim() : "";
   const lines = [
-    "=== USER-CONFIRMED DATE CONTEXT (optional override) ===",
-    y
-      ? `For every transaction date that lacks a 4-digit year in the source text, use calendar year ${y} for YYYY-MM-DD.`
-      : "",
+    "=== MANDATORY DATE RULES (override everything else about year) ===",
+    `YEAR: Any date in the source that does NOT include a 4-digit year MUST use year ${y}. Do NOT guess any other year. This is NOT optional.`,
     m
-      ? `When the source shows only a day number (no month) for a line, assume month ${m} (01–12) unless the text clearly shows another month.`
+      ? `MONTH FALLBACK: When the source shows only a day number (no month visible), assume month ${m} (01–12) unless the text clearly shows another month.`
       : "",
-    "If the source shows only MONTH + YEAR (no day), use day 01 (YYYY-MM-01).",
-    "If a date cannot be determined, default to the current year from Today's date; if still unclear, add a short follow_up_question (JSON mode).",
-    "=== End date context ===",
+    "DAY FALLBACK: If the source shows only MONTH + YEAR (no day), use day 01 (YYYY-MM-01).",
+    "If a date cannot be determined at all, add a short follow_up_question asking the user — do not silently pick a random date.",
+    "=== End date rules ===",
     "",
   ].filter(Boolean);
   return lines.join("\n");
@@ -55,7 +52,7 @@ ${HEADER_LINE}
 Do not put a data row on line 1. Do not skip the header. If there is one expense, output exactly two lines: the header line above, then one data line.
 
 Column rules (data rows only, after the header):
-- date: YYYY-MM-DD. If the OCR date has no year, use the current year from Today's date. If the user message includes USER-CONFIRMED DATE CONTEXT, use that year instead. If the OCR shows only MONTH+YEAR (no day), use day 01 (YYYY-MM-01). If ambiguous (e.g. "12/05"), treat as DD/MM.
+- date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message for the year. If ambiguous (e.g. "12/05"), treat as DD/MM. If OCR shows only MONTH+YEAR (no day), use day 01.
 - amount: positive number only, no currency symbols or commas in the number.
 - category: MUST be copied EXACTLY (same spelling, same case) from the Categories list. Pick the closest match. If nothing fits, use the very first category in the list.
 - payment: MUST be copied EXACTLY from the Payments list. Pick the closest match. If nothing fits, use the very first payment in the list.
@@ -82,7 +79,7 @@ csv_lines rules:
 - Index 0 must be exactly: ${HEADER_LINE}
 - Each further element is ONE complete CSV data row (same columns). Use double-quotes inside a row when a field contains commas.
 - Work hard on messy OCR: fix common confusions (O/0, l/1, S/5), merge split lines when obvious, infer merchant names from fragments.
-- date: YYYY-MM-DD. If the OCR omits a year, use the current year from Today's date unless USER-CONFIRMED DATE CONTEXT provides a year override. If the OCR shows only MONTH+YEAR (no day), use day 01 (YYYY-MM-01). If the bill date is completely missing, use follow_up_questions to ask the user.
+- date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message for the year — never guess a different year. If OCR shows only MONTH+YEAR (no day), use day 01. If the bill date is completely missing, use follow_up_questions to ask the user.
 - amount: positive number only, no currency symbols inside the number. NEVER guess a total you cannot support from the text; if no plausible total exists, output csv_lines with HEADER ONLY (no data rows) and ask in follow_up_questions for the grand total / missing amounts.
 - category and payment: MUST match the user's lists EXACTLY (same spelling and case). Pick the closest semantic match.
 - Single paper receipt: EXACTLY ONE data row = grand total (not every line item). Bank list: one row per purchase/debit (money OUT); skip salary, deposits, credits.
@@ -449,7 +446,7 @@ CSV rules (same as text OCR):
 - Skip income, deposits, salary, credits (money IN).
 - date YYYY-MM-DD, amount positive number, category and payment MUST match the provided lists exactly (copy spelling).
 - notes: merchant or label, max ~60 chars.
-- If the on-screen date does not show a year (e.g. "Apr 15"), use the current year from Today's date unless USER-CONFIRMED DATE CONTEXT provides a year override.
+- If the on-screen date does not show a year (e.g. "Apr 15"), ALWAYS follow the MANDATORY DATE RULES block in the user message for the year — never guess a different year.
 
 If the image is blurry but still financial, do your best; if truly unreadable, use intent unsupported with message explaining.`;
 

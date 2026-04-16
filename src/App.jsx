@@ -2133,15 +2133,15 @@ export default function App({ onReady }) {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
-        *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
-        ::-webkit-scrollbar{width:0;}
-        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.5);}
-        select option{background:#15152A;color:#fff;}
-        button,input,select,textarea,a{-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+        *{box-sizing:border-box;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
+        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(${T.id === "light" ? "0" : "0.5"});}
+        select option{background:${T.card};color:${T.txt};}
         @keyframes spin{to{transform:rotate(360deg);}}
         .spin{animation:spin 1s linear infinite;}
         @keyframes pop{0%{transform:scale(0.8);opacity:0}100%{transform:scale(1);opacity:1}}
         .pop{animation:pop .3s ease-out;}
+        .tab-content{animation:tab-enter .25s ease-out;}
+        button:active{transform:scale(0.97);transition:transform .08s;}
       `}</style>
 
       {/* Skeleton screens handle the loading state — no banner needed */}
@@ -2219,7 +2219,7 @@ export default function App({ onReady }) {
           <HomeSkeleton px={px} />
         )}
         {tab === "home" && !(fbStatus === "loading" && txs.length === 0) && (
-          <div>
+          <div className="tab-content">
             <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
@@ -3762,7 +3762,7 @@ export default function App({ onReady }) {
           <AnalyticsSkeleton px={px} />
         )}
         {tab === "analytics" && !(fbStatus === "loading" && txs.length === 0) && (
-          <div>
+          <div className="tab-content">
             <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
               <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 14 }}>Analytics</div>
               <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
@@ -4001,7 +4001,7 @@ export default function App({ onReady }) {
 
         {/* ═══════════════════ REPORTS TAB ═══════════════════ */}
         {tab === "reports" && (
-          <div>
+          <div className="tab-content">
             <div style={{ padding: `${px + 8}px ${px}px 0` }}>
               <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 12 }}>AI Reports</div>
               <div style={{ display: "flex", gap: 4, background: T.card2, borderRadius: 12, padding: 4, marginBottom: 14 }}>
@@ -4128,7 +4128,7 @@ export default function App({ onReady }) {
           <BudgetsSkeleton px={px} />
         )}
         {tab === "budgets" && !(fbStatus === "loading" && txs.length === 0) && (
-          <div>
+          <div className="tab-content">
             {/* ─── Header + Sub-tabs ─── */}
             <div style={{ padding: `${px + 8}px ${px}px 0` }}>
               <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>Budgets</div>
@@ -4342,7 +4342,7 @@ export default function App({ onReady }) {
         )}
 
         {tab === "profile" && (
-          <div style={{ padding: `${px + 8}px ${px}px 120px` }}>
+          <div className="tab-content" style={{ padding: `${px + 8}px ${px}px 120px` }}>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 18 }}>Profile & Settings</div>
 
             {/* ─── Profile Card ─── */}

@@ -2,26 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#08080F" />
-    <title>Smart Expense Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#060610" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Track" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <title>Track</title>
     <style>
-      /* Lock viewport height — only inner main scrolls; body must not scroll or fixed nav “moves” with the page */
+      /* ── Full-height app shell — body never scrolls ── */
       html {
         -webkit-text-size-adjust: 100%;
-        background: #08080f;
+        background: #060610;
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
       }
       body {
         margin: 0;
-        background: #08080f;
+        background: #060610;
         height: 100%;
         min-height: 100dvh;
         min-height: -webkit-fill-available;
         overflow: hidden;
         overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      /* Allow text selection only in inputs and editable content */
+      input, textarea, [contenteditable] {
+        -webkit-user-select: text;
+        user-select: text;
       }
       #root {
         height: 100%;
@@ -33,22 +48,50 @@
         flex-direction: column;
         width: 100%;
         overflow: hidden;
-        background: #08080f;
+        background: #060610;
       }
-      /* Prevent iOS Safari auto-zoom on input focus — minimum 16px */
+
+      /* ── Native-feel interactions ── */
+      * {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+      }
+      button, a {
+        touch-action: manipulation;
+        cursor: pointer;
+      }
+      /* Smooth momentum scrolling in all scroll containers */
+      [style*="overflow"] {
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* ── Prevent iOS auto-zoom on focus ── */
       @media screen and (max-width: 768px) {
         input, textarea, select { font-size: 16px !important; }
       }
 
-      /* Boneyard shimmer */
+      /* ── Hide scrollbars but keep scroll ── */
+      ::-webkit-scrollbar { width: 0; height: 0; }
+      * { scrollbar-width: none; }
+
+      /* ── Standalone PWA adjustments ── */
+      @media (display-mode: standalone) {
+        body { position: fixed; width: 100%; }
+      }
+
+      /* ── Animations ── */
       @keyframes bone-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+      @keyframes tab-enter {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
 
       /* ── Splash screen ── */
       #splash {
         position: fixed;
         inset: 0;
         z-index: 9999;
-        background: #08080f;
+        background: #060610;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -67,7 +110,7 @@
       #splash .logo-inner {
         width: 58px; height: 58px;
         border-radius: 50%;
-        background: #08080f;
+        background: #060610;
         display: flex; align-items: center; justify-content: center;
         font-size: 28px; font-weight: 900; color: #22c55e;
         font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -98,9 +141,8 @@
     </style>
   </head>
   <body>
-    <!-- Splash screen — visible instantly, hidden after React mounts -->
     <div id="splash">
-      <div class="logo-ring"><div class="logo-inner">₹</div></div>
+      <div class="logo-ring"><div class="logo-inner">T</div></div>
       <div class="splash-title">Track</div>
       <div class="splash-dots"><span></span><span></span><span></span></div>
     </div>

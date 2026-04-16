@@ -119,6 +119,11 @@ export function applyTheme(name) {
   lbl.color = T.sub;
   document.body.style.background = T.bg;
   document.body.style.color = T.txt;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", T.bg);
+  document.documentElement.style.background = T.bg;
+  const root = document.getElementById("root");
+  if (root) root.style.background = T.bg;
 }
 
 export function getThemeId() {

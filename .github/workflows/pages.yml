@@ -32,6 +32,7 @@ jobs:
       - name: Build
         env:
           VITE_BASE_PATH: /sandep/
+          VITE_OPENAI_API_KEY: ${{ secrets.VITE_OPENAI_API_KEY }}
         run: npm run build
       - name: Show built index.html
         run: cat dist/index.html

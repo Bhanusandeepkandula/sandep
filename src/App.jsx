@@ -48,6 +48,7 @@ import {
 } from "./auth/pinProfiles.js";
 import { parseExpenseCsv } from "./importParse.js";
 import { extractExpenseJson, normalizeScanResult } from "./scanAi.js";
+import { convertOcrToCsv } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 
@@ -884,11 +885,6 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
     reader.readAsText(f);
   }
 
-  function ocrCsvApiUrl() {
-    const b = import.meta.env.BASE_URL || "/";
-    return (b.endsWith("/") ? b : `${b}/`) + "api/convert";
-  }
-
   async function convertOcrTextToCsv() {
     setOcrCsvErr("");
     if (!ocrCsvText.trim()) {
@@ -897,25 +893,13 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
     }
     setOcrCsvBusy(true);
     try {
-      const r = await fetch(ocrCsvApiUrl(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ocrText: ocrCsvText }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setOcrCsvOut("");
-        setOcrCsvErr(typeof data.error === "string" ? data.error : `Request failed (${r.status})`);
-        return;
-      }
-      if (typeof data.csv === "string") {
-        setOcrCsvOut(data.csv);
-      } else {
-        setOcrCsvErr("Unexpected response from server.");
-      }
+      const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
+      const payNames = (catalogRef.current.payments || []).filter(Boolean);
+      const csv = await convertOcrToCsv(ocrCsvText, { categories: catNames, payments: payNames });
+      setOcrCsvOut(csv);
     } catch (e) {
       console.error(e);
-      setOcrCsvErr(e instanceof Error ? e.message : "Network error — use npm run dev with OPENAI_API_KEY.");
+      setOcrCsvErr(e instanceof Error ? e.message : "Conversion failed. Try again.");
     } finally {
       setOcrCsvBusy(false);
     }
@@ -1678,9 +1662,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                 }}
               >
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-                  Paste raw OCR text, or add text from a receipt photo (Tesseract in the browser). Then convert with OpenAI — key stays on the server in{" "}
-                  <code style={{ color: T.sub }}>npm run dev</code> only (<code style={{ fontSize: 11 }}>OPENAI_API_KEY</code> in <code style={{ fontSize: 11 }}>.env.local</code>
-                  ). Static deploys need your own API.
+                  Upload a receipt photo or paste OCR text — OpenAI converts it to your expense CSV format automatically.
                 </div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                   <button

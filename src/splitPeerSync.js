@@ -24,12 +24,18 @@ export function enrichSplitPeopleFromContacts(split, contactsArr) {
     ...split,
     people: split.people.map((p) => {
       const pName = String(p.n || "").trim().toLowerCase();
-      const c = contacts.find((x) => x.n.toLowerCase() === pName);
       const n = String(p.n || "").trim();
       const a = typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0;
+
+      // Try exact match first, then first-word / contains fallback
+      const c =
+        contacts.find((x) => x.n.toLowerCase() === pName) ||
+        contacts.find((x) => x.n.toLowerCase().startsWith(pName) || pName.startsWith(x.n.toLowerCase()));
+
       const out = { n, a };
-      if (c?.u) out.u = c.u;
-      if (c?.e) out.e = c.e;
+      // Preserve any UUID/email already on the person (e.g. from a prior enrichment)
+      if (c?.u || p.u) out.u = c?.u || p.u;
+      if (c?.e || p.e) out.e = c?.e || p.e;
       return out;
     }),
   };

@@ -631,19 +631,41 @@ export default function App({ onReady }) {
                 ? formatMoneyRef.current(rawShare)
                 : formatMoneyRef.current(Number(tx.amount) || 0);
               const merchant = (typeof tx.notes === "string" && tx.notes.trim()) || tx.category || "Expense";
-              dlg.toast(
-                `${merchant} · your share ${amtFmt} (bill ${formatMoneyRef.current(Number(tx.amount) || 0)})`,
-                {
-                  type: "info",
-                  title: "New split received",
-                  duration: 7000,
-                  actionLabel: "View",
-                  onClick: () => {
-                    setSelectedTx(tx);
-                    setTab("home");
-                  },
+              const splitBody = `${merchant} · your share ${amtFmt} (bill ${formatMoneyRef.current(Number(tx.amount) || 0)})`;
+              dlg.toast(splitBody, {
+                type: "info",
+                title: "New split received",
+                duration: 7000,
+                actionLabel: "View",
+                onClick: () => {
+                  setSelectedTx(tx);
+                  setTab("home");
+                },
+              });
+              // Browser push notification so it works even when the tab is in the background
+              try {
+                if ("Notification" in window) {
+                  if (Notification.permission === "default") {
+                    void Notification.requestPermission();
+                  }
+                  if (Notification.permission === "granted") {
+                    const n = new Notification("New split received 💸", {
+                      body: splitBody,
+                      tag: `split-${tx.id}`,
+                      icon: "/favicon.ico",
+                    });
+                    n.onclick = () => {
+                      window.focus();
+                      setSelectedTx(tx);
+                      setTab("home");
+                    };
+                  }
                 }
-              );
+                // Vibrate on mobile when a split arrives
+                if ("vibrate" in navigator) navigator.vibrate([120, 60, 120]);
+              } catch {
+                /* ignore — notification API not available */
+              }
             }
           }
           seenTxIdsRef.current = new Set(rows.map((r) => r.id));
@@ -4478,6 +4500,8 @@ export default function App({ onReady }) {
         {tab === "profile" && (
           <div className="tab-content" style={{ padding: `${px + 8}px ${px}px 120px` }}>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 18 }}>Profile & Settings</div>
+            {/* Silently request notification permission when user opens Profile — needed for split alerts */}
+            {typeof window !== "undefined" && "Notification" in window && Notification.permission === "default" && (() => { void Notification.requestPermission(); return null; })()}
 
             {/* ─── Profile Card ─── */}
             <div style={{ ...card, marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 14 }}>

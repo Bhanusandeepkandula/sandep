@@ -26,8 +26,9 @@ Column rules (data rows only, after the header):
 
 Amount rules — IMPORTANT:
 - For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE data row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual line items.
-- For a bank statement or transaction list with multiple separate transactions: output one data row per transaction.
-- Always prefer GRAND TOTAL > TOTAL > subtotal. Taxes and service charges are included in the grand total.
+- For a bank statement or transaction list: output ONE row per **expense / purchase / money going OUT** only. Do NOT output rows for: salary, payroll, interest earned, dividends, bank credits, deposits, transfers received, or any money **coming IN**. Skip those lines entirely.
+- If the text only describes income/credits and no purchases, output the header row only (no data rows).
+- Always prefer GRAND TOTAL > TOTAL > subtotal for receipts. Taxes and service charges are included in the grand total.
 
 Output rules:
 - Return ONLY the CSV text. No markdown, no explanation, no code fences, no leading commentary.

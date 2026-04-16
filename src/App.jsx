@@ -62,7 +62,7 @@ import {
   PENDING_LOGIN_EMAIL_KEY,
 } from "./auth/pinProfiles.js";
 import { parseExpenseCsv } from "./importParse.js";
-import { extractExpenseJson, normalizeScanResult } from "./scanAi.js";
+import { extractExpenseJson, normalizeScanResult, formatMissingScanFieldsMessage } from "./scanAi.js";
 import { convertOcrToCsv } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
@@ -76,6 +76,15 @@ import {
   sameSplitPerson,
   personStableKey,
 } from "./splitContactShare.js";
+import {
+  enrichSplitPeopleFromContacts,
+  publishPeerProfileIndex,
+  upsertSplitMirrors,
+  deleteMirrorsForOwnerTransaction,
+} from "./splitPeerSync.js";
+
+/** UI + modal value for overall monthly cap (stored as `monthlyBudgetTotal` on settings/app, not under `budgets`). */
+const MONTH_TOTAL_BUDGET_KEY = "__month_total__";
 
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 
@@ -119,7 +128,12 @@ export default function App() {
   /** During image/statement scan: read → ai → parse. */
   const [scanPhase, setScanPhase] = useState(null);
   const [scanErr, setScanErr] = useState("");
-  const fileRef = useRef();
+  /** After receipt scan: fields the model could not read (suppresses auto-fill for those). */
+  const [scanMissingFieldKeys, setScanMissingFieldKeys] = useState([]);
+  /** Friendly prompt asking the user to complete missing bill details. */
+  const [scanFillPrompt, setScanFillPrompt] = useState("");
+  const scanCameraRef = useRef();
+  const scanGalleryRef = useRef();
   const stmtRef = useRef();
   const csvRef = useRef();
   const ocrCsvImgRef = useRef();
@@ -153,6 +167,8 @@ export default function App() {
   const [showBM, setShowBM] = useState(false);
   const [bmCat, setBmCat] = useState("");
   const [bmAmt, setBmAmt] = useState("");
+  /** Overall monthly spending cap (optional, no category). Synced as `monthlyBudgetTotal` in Firestore. */
+  const [monthlyBudgetTotal, setMonthlyBudgetTotal] = useState(null);
 
   const [newP, setNewP] = useState("");
 
@@ -372,6 +388,11 @@ export default function App() {
           }
           const d = snap.data();
           if (d.budgets && typeof d.budgets === "object") setBudgets(d.budgets);
+          if (typeof d.monthlyBudgetTotal === "number" && Number.isFinite(d.monthlyBudgetTotal) && d.monthlyBudgetTotal > 0) {
+            setMonthlyBudgetTotal(d.monthlyBudgetTotal);
+          } else {
+            setMonthlyBudgetTotal(null);
+          }
           if (Array.isArray(d.people)) {
             setPeople(d.people.map((x) => normalizePerson(x)).filter((p) => p.n));
           }
@@ -414,6 +435,11 @@ export default function App() {
               const o = JSON.parse(raw);
               if (Array.isArray(o.txs)) setTxs(o.txs);
               if (o.budgets && typeof o.budgets === "object") setBudgets(o.budgets);
+              if (typeof o.monthlyBudgetTotal === "number" && Number.isFinite(o.monthlyBudgetTotal) && o.monthlyBudgetTotal > 0) {
+                setMonthlyBudgetTotal(o.monthlyBudgetTotal);
+              } else {
+                setMonthlyBudgetTotal(null);
+              }
               if (Array.isArray(o.people)) {
                 setPeople(o.people.map((x) => normalizePerson(x)).filter((p) => p.n));
               }
@@ -422,11 +448,13 @@ export default function App() {
             } else {
               setTxs([]);
               setBudgets({});
+              setMonthlyBudgetTotal(null);
               setPeople([]);
             }
           } catch {
             setTxs([]);
             setBudgets({});
+            setMonthlyBudgetTotal(null);
             setPeople([]);
           }
           setCatalog({
@@ -457,12 +485,12 @@ export default function App() {
     try {
       localStorage.setItem(
         offlineStorageKey(firebaseUser.uid),
-        JSON.stringify({ txs, budgets, people, userCategories, userPayments })
+        JSON.stringify({ txs, budgets, monthlyBudgetTotal, people, userCategories, userPayments })
       );
     } catch {
       /* ignore */
     }
-  }, [fbStatus, firebaseUser?.uid, txs, budgets, people, userCategories, userPayments]);
+  }, [fbStatus, firebaseUser?.uid, txs, budgets, monthlyBudgetTotal, people, userCategories, userPayments]);
 
   useEffect(() => {
     if (tab !== "profile") return;
@@ -477,6 +505,14 @@ export default function App() {
     setTips([]);
     setAiInsightsUpdatedAt(0);
   }, [firebaseUser?.uid]);
+
+  /** So friends can resolve this account when mirroring split expenses (QR-linked profile id). */
+  useEffect(() => {
+    const u = firebaseUser?.uid;
+    const pid = (profileTagUuid && String(profileTagUuid).trim()) || "";
+    if (!u || !pid) return;
+    void publishPeerProfileIndex(db, u, pid);
+  }, [firebaseUser?.uid, profileTagUuid]);
 
   async function persistPeople(nextList) {
     const norm = nextList.map(normalizePerson).filter((p) => p.n);
@@ -528,20 +564,35 @@ export default function App() {
           }
         : null;
 
+    const enriched = cleaned ? enrichSplitPeopleFromContacts(cleaned, people) : null;
+    const prevTx = txs.find((t) => t.id === txId);
+    const isMirrorCopy =
+      prevTx &&
+      typeof prevTx.syncedFromUid === "string" &&
+      prevTx.syncedFromUid.trim() &&
+      prevTx.syncedFromUid !== uidRef.current;
+
     if (!uidRef.current) {
-      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: cleaned } : t)));
-      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: cleaned } : st));
+      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: enriched } : t)));
+      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: enriched } : st));
       return;
     }
     try {
+      if (!isMirrorCopy && prevTx?.split?.people?.length) {
+        await deleteMirrorsForOwnerTransaction(db, uidRef.current, prevTx);
+      }
       const ref = doc(db, "users", uidRef.current, "transactions", txId);
-      if (cleaned == null) {
+      if (enriched == null) {
         await updateDoc(ref, { split: deleteField() });
       } else {
-        await setDoc(ref, sanitizeForFirestore({ split: cleaned }), { merge: true });
+        await setDoc(ref, sanitizeForFirestore({ split: enriched }), { merge: true });
       }
-      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: cleaned } : t)));
-      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: cleaned } : st));
+      const merged = prevTx ? { ...prevTx, split: enriched } : null;
+      setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, split: enriched } : t)));
+      setSelectedTx((st) => (st && st.id === txId ? { ...st, split: enriched } : st));
+      if (!isMirrorCopy && merged?.split?.people?.length) {
+        await upsertSplitMirrors(db, uidRef.current, merged);
+      }
     } catch (e) {
       console.error(e);
       window.alert("Could not save split. Check your connection.");
@@ -569,11 +620,12 @@ export default function App() {
 
   useEffect(() => {
     if (!payments.length) return;
+    if (scanMissingFieldKeys.includes("payment")) return;
     setForm((f) => ({
       ...f,
       payment: payments.includes(f.payment) ? f.payment : payments[0],
     }));
-  }, [payments]);
+  }, [payments, scanMissingFieldKeys]);
 
   /** After save, success UI is at top — scroll so it is not missed below the fold. */
   useEffect(() => {
@@ -585,9 +637,10 @@ export default function App() {
   useEffect(() => {
     if (tab !== "add" || step !== "form") return;
     if (form.category) return;
+    if (scanMissingFieldKeys.includes("category")) return;
     const first = categories[0]?.n;
     if (first) setForm((p) => ({ ...p, category: first }));
-  }, [tab, step, categories, form.category]);
+  }, [tab, step, categories, form.category, scanMissingFieldKeys]);
 
   const filtered = useMemo(() => filterTx(txs, df, cS, cE), [txs, df, cS, cE]);
   const fTotal = useMemo(() => tot(filtered), [filtered]);
@@ -597,6 +650,16 @@ export default function App() {
   const todayTotal = useMemo(() => tot(todayTxs), [todayTxs]);
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
   const weekTotal = useMemo(() => tot(weekTxs), [weekTxs]);
+
+  /** Overall monthly cap ring: remaining arc shrinks as `monthTotal` grows. */
+  const monthBudgetRing = useMemo(() => {
+    const cap = typeof monthlyBudgetTotal === "number" && monthlyBudgetTotal > 0 ? monthlyBudgetTotal : null;
+    if (cap == null) return null;
+    const spent = monthTotal;
+    const remainingFrac = Math.max(0, (cap - spent) / cap);
+    const over = spent > cap;
+    return { cap, spent, remainingFrac, over };
+  }, [monthlyBudgetTotal, monthTotal]);
 
   const breakdown = useMemo(() => {
     const m = {};
@@ -629,7 +692,9 @@ export default function App() {
 
   /** Budgets tab: over-limit first, then by % used (desc), then name. */
   const budgetEntriesSorted = useMemo(() => {
-    return Object.entries(budgets).sort(([ca, la], [cb, lb]) => {
+    return Object.entries(budgets)
+      .filter(([ca]) => ca !== MONTH_TOTAL_BUDGET_KEY)
+      .sort(([ca, la], [cb, lb]) => {
       const sa = catSpent[ca] || 0;
       const sb = catSpent[cb] || 0;
       const oa = sa > la;
@@ -668,6 +733,16 @@ export default function App() {
   async function delTx(id) {
     if (uidRef.current) {
       try {
+        let tx = txs.find((t) => t.id === id);
+        if (!tx) {
+          const snap = await getDoc(doc(db, "users", uidRef.current, "transactions", id));
+          if (snap.exists()) tx = { id, ...snap.data() };
+        }
+        const fromPeer =
+          tx && typeof tx.syncedFromUid === "string" && tx.syncedFromUid.trim() && tx.syncedFromUid !== uidRef.current;
+        if (tx && !fromPeer && tx.split?.people?.length) {
+          await deleteMirrorsForOwnerTransaction(db, uidRef.current, tx);
+        }
         await deleteDoc(doc(db, "users", uidRef.current, "transactions", id));
       } catch (e) {
         console.error(e);
@@ -734,11 +809,17 @@ export default function App() {
     mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function clearScanHints() {
+    setScanMissingFieldKeys([]);
+    setScanFillPrompt("");
+  }
+
   /** Success screen, then Home + toast so saving is obvious even if the check view was scrolled away. */
   function schedulePostSaveReset(newTx) {
     setBulkSuccess(null);
     setFErr("");
     setScanErr("");
+    clearScanHints();
     setStep("success");
     setTimeout(() => {
       setStep("mode");
@@ -782,7 +863,8 @@ export default function App() {
     }
     setFErr("");
     setScanErr("");
-    const splitNormalized =
+    clearScanHints();
+    let splitNormalized =
       splitOn && splitPpl.length > 0
         ? {
             type: splitType,
@@ -792,6 +874,9 @@ export default function App() {
             })),
           }
         : null;
+    if (splitNormalized) {
+      splitNormalized = enrichSplitPeopleFromContacts(splitNormalized, people);
+    }
     const tagUuid = (profileTagUuid && String(profileTagUuid).trim()) || uidRef.current || "";
     const newTx = {
       id: uid(),
@@ -832,6 +917,7 @@ export default function App() {
       }
       if (receiptUrl) newTx.receiptUrl = receiptUrl;
       await setDoc(doc(db, "users", uidRef.current, "transactions", newTx.id), sanitizeForFirestore(newTx));
+      await upsertSplitMirrors(db, uidRef.current, newTx);
     } catch (e) {
       console.error(e);
       setFErr("Could not save expense. Check your connection.");
@@ -869,12 +955,20 @@ export default function App() {
     setPreviewImg(null);
     setScanLineItems(null);
     setScanErr("");
+    clearScanHints();
     try {
-      if (fileRef.current) fileRef.current.value = "";
+      if (scanCameraRef.current) scanCameraRef.current.value = "";
+      if (scanGalleryRef.current) scanGalleryRef.current.value = "";
       if (stmtRef.current) stmtRef.current.value = "";
     } catch {
       /* ignore */
     }
+  }
+
+  /** If async scan stops early (cancel/abort), avoid leaving the UI stuck on "processing". */
+  function recoverFromStuckScan() {
+    setScanPhase(null);
+    setStep((s) => (s === "processing" ? "mode" : s));
   }
 
   async function processFile(e, isStatement = false) {
@@ -901,8 +995,13 @@ export default function App() {
     }
 
     setScanErr("");
+    clearScanHints();
     setScanPhase("read");
     setStep("processing");
+    // Let the browser paint the loading state before heavy FileReader / OCR work (avoids a "frozen blank" stretch on mobile).
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined)));
+    });
 
     try {
       const cats = catalogRef.current.categories || [];
@@ -919,26 +1018,38 @@ export default function App() {
         try {
           text = await extractTextFromFile(f);
         } catch (extractErr) {
-          if (scanCancelledRef.current) return;
+          if (scanCancelledRef.current) {
+            recoverFromStuckScan();
+            return;
+          }
           setScanErr(extractErr instanceof Error ? extractErr.message : "Could not read this file. Try exporting as CSV from your bank app.");
           setScanPhase(null);
           setStep("mode");
           return;
         }
-        if (scanCancelledRef.current) return;
+        if (scanCancelledRef.current) {
+          recoverFromStuckScan();
+          return;
+        }
 
         setScanPhase("ai");
         let csv;
         try {
           csv = await convertOcrToCsv(text, { categories: catNames, payments: payNames });
         } catch (aiErr) {
-          if (scanCancelledRef.current) return;
+          if (scanCancelledRef.current) {
+            recoverFromStuckScan();
+            return;
+          }
           setScanErr(aiErr instanceof Error ? aiErr.message : "AI conversion failed. Try again.");
           setScanPhase(null);
           setStep("mode");
           return;
         }
-        if (scanCancelledRef.current) return;
+        if (scanCancelledRef.current) {
+          recoverFromStuckScan();
+          return;
+        }
 
         setScanPhase("parse");
         const { rows, fatal } = parseExpenseCsv(csv, { categories: catNames, payments: payNames });
@@ -977,13 +1088,16 @@ export default function App() {
         } else {
           scanPhaseOrderRef.current = ["read", "ai", "parse"];
         }
-        if (scanCancelledRef.current) return;
+        if (scanCancelledRef.current) {
+          recoverFromStuckScan();
+          return;
+        }
 
         userContent = [
           { type: "image_url", image_url: { url: raw, detail: "low" } },
           {
             type: "text",
-            text: `${ocrText ? `OCR text (use as hint only): ${ocrText}\n\n` : ""}Extract expense from this receipt. Return ONLY JSON:\n{"total":number,"category":"from list","date":"YYYY-MM-DD","notes":"merchant name","payment":"from list","line_items":[{"name":"string","amount":number}]}\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.`,
+            text: `${ocrText ? `OCR text (use as hint only): ${ocrText}\n\n` : ""}Extract the purchase EXPENSE from this receipt (money spent). Ignore salary slips, deposit slips, or pure credit notices.\n\nReturn ONLY one JSON object with this shape (use null for any value you cannot read clearly; never guess totals or dates):\n{"total":number|null,"category":string|null,"date":"YYYY-MM-DD"|null,"notes":string|null,"payment":string|null,"line_items":[...]|null,"missing_fields":["total","date"]}\nExample when all clear: "missing_fields":[]\nExample when date and total are unreadable: "missing_fields":["date","total"]\n\n"missing_fields" MUST list every field you could not read reliably, using exactly these keys: "total", "date", "category", "payment", "notes", "line_items". If the total, date, or merchant is blurry, cropped, or missing, include the matching key.\n\nCategories (pick closest or null): ${catList}\nPayments (pick closest or null): ${payList}\nUse plain numbers without currency symbols in JSON.`,
           },
         ];
       } else {
@@ -991,13 +1105,19 @@ export default function App() {
         scanPhaseOrderRef.current = ["read", "ocr", "ai", "parse"];
         setScanPhase("ocr");
         const text = await extractTextFromFile(f);
-        if (scanCancelledRef.current) return;
+        if (scanCancelledRef.current) {
+          recoverFromStuckScan();
+          return;
+        }
 
-        userContent = `Extract the main expense from this receipt text. Return ONLY JSON:\n{"total":number,"category":"from list","date":"YYYY-MM-DD","notes":"merchant name","payment":"from list","line_items":[{"name":"string","amount":number}]}\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.\n\nReceipt text:\n${text}`;
+        userContent = `Extract the main purchase EXPENSE from this receipt text (money spent only). Skip salary/bank credit/deposit-only text.\n\nReturn ONLY one JSON object with "missing_fields" as an array of keys (same rules as for images). Example: {"total":120,"missing_fields":[]} or {"total":null,"missing_fields":["total","date"]}.\n\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.\n\nReceipt text:\n${text}`;
       }
 
       setScanPhase("ai");
-      if (scanCancelledRef.current) return;
+      if (scanCancelledRef.current) {
+        recoverFromStuckScan();
+        return;
+      }
 
       const r = await fetch(OPENAI_API, {
         signal: fetchSignal,
@@ -1005,19 +1125,30 @@ export default function App() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
         body: JSON.stringify({
           model: "gpt-4o-mini",
-          max_tokens: 1000,
+          max_tokens: 1200,
           temperature: 0,
           messages: [
-            { role: "system", content: "You extract structured expense data from receipts. Return ONLY valid JSON, no markdown, no extra text." },
+            {
+              role: "system",
+              content:
+                "You extract structured EXPENSE data from receipts and bills only. Return ONLY valid JSON, no markdown, no extra text. " +
+                "The total must be money the user spent (purchase), not salary, bank credits, deposits, or refunds received. " +
+                "Always include the array \"missing_fields\" listing any of: total, date, category, payment, notes, line_items that are unreadable, cropped, or ambiguous—never invent amounts or dates. " +
+                "If the image is only a bank credit or income notice with no purchase, return {\"total\":0} or omit total and explain via missing_fields as appropriate.",
+            },
             { role: "user", content: userContent },
           ],
         }),
       });
 
-      if (scanCancelledRef.current) return;
+      if (scanCancelledRef.current) {
+        recoverFromStuckScan();
+        return;
+      }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = d?.error?.message || `OpenAI error (${r.status})`;
+        clearScanHints();
         setScanErr(r.status === 401 ? "Invalid OpenAI API key. Check VITE_OPENAI_API_KEY." : r.status === 429 ? "OpenAI rate limit hit — wait a moment and retry." : msg);
         setScanPhase(null);
         setStep("form");
@@ -1036,25 +1167,32 @@ export default function App() {
 
       const items = Array.isArray(normalized.lineItems) ? normalized.lineItems.slice(0, 50) : [];
       setScanLineItems(items.length ? items : null);
+      const mf = normalized.missingFields || [];
+      setScanMissingFieldKeys(mf);
       setForm((p) => ({
         ...p,
         amount: normalized.amount,
-        category: normalized.category,
-        date: normalized.date || tdStr(),
-        payment: normalized.payment || p.payment || payNames[0] || "",
-        notes: normalized.notes || p.notes,
+        category: mf.includes("category") ? "" : normalized.category,
+        date: normalized.date,
+        payment: mf.includes("payment") ? "" : normalized.payment || p.payment || payNames[0] || "",
+        notes: mf.includes("notes") ? "" : normalized.notes || p.notes,
       }));
-      if (!normalized.amount || parseFloat(normalized.amount) <= 0) {
-        setScanErr("Could not read a clear total. Enter the amount manually or try a clearer photo.");
-      } else {
-        setScanErr("");
+      let fill = formatMissingScanFieldsMessage(mf);
+      if (!fill && (!normalized.amount || parseFloat(normalized.amount) <= 0)) {
+        fill = "We couldn’t detect a total on this bill. Enter the amount below before saving.";
       }
+      setScanFillPrompt(fill);
+      setScanErr("");
       notifyScanReadyIfBackground();
       setScanPhase(null);
       setStep("form");
     } catch (err) {
-      if (err?.name === "AbortError" || scanCancelledRef.current) { setScanPhase(null); return; }
+      if (err?.name === "AbortError" || scanCancelledRef.current) {
+        recoverFromStuckScan();
+        return;
+      }
       console.error(err);
+      clearScanHints();
       setScanErr(err instanceof Error ? err.message : "Scan failed. Check your connection and try again.");
       setScanPhase(null);
       setStep("form");
@@ -1291,6 +1429,7 @@ export default function App() {
       currency,
       period: "current month",
       monthTotal,
+      overallMonthlyBudgetCap: typeof monthlyBudgetTotal === "number" && monthlyBudgetTotal > 0 ? monthlyBudgetTotal : null,
       weekTotal,
       last7DaysTotal: last7,
       totalTransactions: monthTxs.length,
@@ -1368,8 +1507,28 @@ export default function App() {
   }
 
   async function saveBudget() {
-    if (!bmCat || !bmAmt || isNaN(+bmAmt)) return;
+    if (!bmAmt || isNaN(+bmAmt)) return;
     const next = parseFloat(bmAmt);
+    if (next <= 0) return;
+
+    if (bmCat === MONTH_TOTAL_BUDGET_KEY) {
+      if (uidRef.current) {
+        try {
+          await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { monthlyBudgetTotal: next }, { merge: true });
+        } catch (e) {
+          console.error(e);
+          return;
+        }
+      } else {
+        setMonthlyBudgetTotal(next);
+      }
+      setShowBM(false);
+      setBmCat("");
+      setBmAmt("");
+      return;
+    }
+
+    if (!bmCat) return;
     if (uidRef.current) {
       try {
         await setDoc(
@@ -1387,6 +1546,20 @@ export default function App() {
     setShowBM(false);
     setBmCat("");
     setBmAmt("");
+  }
+
+  async function removeMonthlyBudgetTotal() {
+    if (!window.confirm("Remove your overall monthly spending cap? The ring on Home will be hidden until you set a new cap.")) return;
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { monthlyBudgetTotal: deleteField() }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    } else {
+      setMonthlyBudgetTotal(null);
+    }
   }
 
   async function removeBudgetCategory(cat) {
@@ -1653,8 +1826,76 @@ export default function App() {
                   background: "rgba(96,165,250,0.05)",
                 }}
               />
-              <div style={{ fontSize: 13, color: T.sub, marginBottom: 3 }}>This Month</div>
-              <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: "-1.5px", marginBottom: 14 }}>{formatMoney(monthTotal)}</div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 14,
+                  marginBottom: 14,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 3 }}>This Month</div>
+                  <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: "-1.5px", lineHeight: 1.1 }}>{formatMoney(monthTotal)}</div>
+                </div>
+                {monthBudgetRing ? (
+                  <button
+                    type="button"
+                    onClick={() => setTab("budgets")}
+                    title="Monthly spending cap — tap to edit in Budgets"
+                    aria-label="Monthly budget progress, open Budgets"
+                    style={{
+                      flexShrink: 0,
+                      position: "relative",
+                      width: 92,
+                      height: 92,
+                      padding: 0,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <svg width={92} height={92} viewBox="0 0 100 100" style={{ transform: "rotate(-90deg)", display: "block" }} aria-hidden>
+                      <circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="38"
+                        fill="none"
+                        stroke={monthBudgetRing.over ? T.dng : monthBudgetRing.remainingFrac <= 0.2 ? T.warn : T.acc}
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        strokeDasharray={`${monthBudgetRing.remainingFrac * (2 * Math.PI * 38)} ${2 * Math.PI * 38}`}
+                        style={{ transition: "stroke-dasharray 0.45s ease, stroke 0.25s ease" }}
+                      />
+                    </svg>
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {monthBudgetRing.over ? (
+                        <div style={{ fontSize: 14, fontWeight: 800, color: T.dng }}>Over</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.5px" }}>{Math.round(monthBudgetRing.remainingFrac * 100)}%</div>
+                          <div style={{ fontSize: 9, color: T.sub, marginTop: 1 }}>left</div>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                ) : null}
+              </div>
               <div style={{ display: "flex", gap: 12 }}>
                 <div style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
                   <div style={{ fontSize: 11, color: T.sub, marginBottom: 3 }}>Today</div>
@@ -1800,7 +2041,7 @@ export default function App() {
             </div>
 
             {Object.entries(budgets)
-              .filter(([c, l]) => (catSpent[c] || 0) >= l * 0.8)
+              .filter(([c, l]) => c !== MONTH_TOTAL_BUDGET_KEY && (catSpent[c] || 0) >= l * 0.8)
               .slice(0, 2)
               .map(([c, l]) => {
                 const sp = catSpent[c] || 0;
@@ -1856,19 +2097,47 @@ export default function App() {
         )}
 
         {tab === "add" && (
-          <div>
+          <div style={{ position: "relative" }}>
+            <input
+              ref={scanCameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple={false}
+              style={{ display: "none" }}
+              onChange={(e) => void processFile(e, false)}
+            />
+            <input
+              ref={scanGalleryRef}
+              type="file"
+              accept="image/*"
+              multiple={false}
+              style={{ display: "none" }}
+              onChange={(e) => void processFile(e, false)}
+            />
+            {step !== "processing" && (
             <div style={{ padding: `${px + 8}px ${px}px`, display: "flex", alignItems: "center", gap: 12 }}>
-              {(step === "form" || step === "importPreview" || step === "processing" || step === "ocrCsv") && (
+              {(step === "form" ||
+                step === "importPreview" ||
+                step === "ocrCsv" ||
+                step === "scanSource") && (
                 <button
                   type="button"
-                  aria-label={step === "processing" ? "Cancel scan" : "Back"}
+                  aria-label="Back"
                   onClick={() => {
-                    if (step === "processing") {
-                      cancelActiveScan();
+                    if (step === "scanSource") {
+                      setStep("mode");
+                      try {
+                        if (scanCameraRef.current) scanCameraRef.current.value = "";
+                        if (scanGalleryRef.current) scanGalleryRef.current.value = "";
+                      } catch {
+                        /* ignore */
+                      }
                       return;
                     }
                     setStep("mode");
                     setScanErr("");
+                    clearScanHints();
                     setImportBundle(null);
                     setPreviewImg(null);
                     setScanLineItems(null);
@@ -1889,15 +2158,111 @@ export default function App() {
                     ? "Expense Details"
                     : step === "importPreview"
                       ? "Review import"
-                      : step === "processing"
-                      ? "Scanning…"
                       : step === "ocrCsv"
                         ? "OCR → CSV"
-                        : step === "success"
-                          ? "Saved!"
-                          : "Add Expense"}
+                        : step === "scanSource"
+                          ? "Scan receipt"
+                          : step === "success"
+                            ? "Saved!"
+                            : "Add Expense"}
               </div>
             </div>
+            )}
+
+            {step === "processing" && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-busy="true"
+                aria-label="Scanning receipt"
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: 160,
+                  maxWidth: maxShell,
+                  marginLeft: "auto",
+                  marginRight: "auto",
+                  background: "rgba(10,10,22,0.96)",
+                  backdropFilter: "blur(8px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  paddingTop: safeTop,
+                  paddingBottom: "max(24px, env(safe-area-inset-bottom, 0px))",
+                  paddingLeft: px,
+                  paddingRight: px,
+                  boxSizing: "border-box",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => cancelActiveScan()}
+                  style={{
+                    alignSelf: "flex-start",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "none",
+                    border: "none",
+                    color: T.sub,
+                    cursor: "pointer",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    padding: "8px 4px",
+                    marginBottom: 8,
+                  }}
+                >
+                  <ArrowLeft size={20} /> Cancel scan
+                </button>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: 0 }}>
+                  <div
+                    className="spin"
+                    style={{
+                      width: 48,
+                      height: 48,
+                      border: `3px solid ${T.bdr}`,
+                      borderTopColor: T.acc,
+                      borderRadius: "50%",
+                      marginBottom: 20,
+                    }}
+                  />
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Scanning receipt…</div>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 24, lineHeight: 1.45, maxWidth: 300 }}>
+                    Large photos or a slow connection can take 30–60 seconds. Keep this screen open.
+                  </div>
+                  <div style={{ textAlign: "left", width: "100%", maxWidth: 320, fontSize: 13 }}>
+                    {(scanPhaseOrderRef.current.length ? scanPhaseOrderRef.current : ["read", "ai", "parse"]).map((id, i, order) => {
+                      const labels = {
+                        read: "Reading file from your device",
+                        ocr: "Extracting text from file",
+                        ai: "Sending to OpenAI for analysis",
+                        parse: "Parsing total, category & lines",
+                      };
+                      const phase = order.includes(scanPhase) ? scanPhase : order[0];
+                      const idx = order.indexOf(phase);
+                      const done = idx > i;
+                      const active = phase === id;
+                      return (
+                        <div
+                          key={id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 0",
+                            borderBottom: i < order.length - 1 ? `1px solid ${T.bdr}` : "none",
+                            color: done || active ? T.txt : T.mut,
+                            fontWeight: active ? 700 : 500,
+                          }}
+                        >
+                          <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
+                          {labels[id] || id}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
               {step === "mode" && (
               <div style={{ padding: `0 ${px}px` }}>
@@ -1918,7 +2283,13 @@ export default function App() {
                     sub: "Paste bill text or OCR an image; OpenAI builds import CSV (dev server)",
                     col: T.purp,
                   },
-                  { mode: "image", icon: "📷", title: "Scan Receipt / Bill", sub: "AI extracts details from photo", col: T.blue },
+                  {
+                    mode: "image",
+                    icon: "📷",
+                    title: "Scan Receipt / Bill",
+                    sub: "Take a photo or choose one image from your library",
+                    col: T.blue,
+                  },
                   {
                     mode: "statement",
                     icon: "📄",
@@ -1940,7 +2311,10 @@ export default function App() {
                       else if (opt.mode === "ocrCsv") {
                         setOcrCsvErr("");
                         setStep("ocrCsv");
-                      } else if (opt.mode === "image") fileRef.current?.click();
+                      } else if (opt.mode === "image") {
+                        setScanErr("");
+                        setStep("scanSource");
+                      }
                       else stmtRef.current?.click();
                     }}
                     onKeyDown={(e) => {
@@ -1952,7 +2326,10 @@ export default function App() {
                         else if (opt.mode === "ocrCsv") {
                           setOcrCsvErr("");
                           setStep("ocrCsv");
-                        } else if (opt.mode === "image") fileRef.current?.click();
+                        } else if (opt.mode === "image") {
+                        setScanErr("");
+                        setStep("scanSource");
+                      }
                         else stmtRef.current?.click();
                       }
                     }}
@@ -1997,7 +2374,6 @@ export default function App() {
                     <span style={{ color: T.mut, fontSize: 18 }}>{opt.comingSoon ? "—" : "›"}</span>
                   </div>
                 ))}
-                <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => void processFile(e, false)} />
                 <input ref={stmtRef} type="file" accept="image/*,.pdf,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
                 <input
                   ref={csvRef}
@@ -2013,6 +2389,77 @@ export default function App() {
                   style={{ display: "none" }}
                   onChange={(e) => void fillOcrFromImageFile(e)}
                 />
+              </div>
+            )}
+
+            {step === "scanSource" && (
+              <div style={{ padding: `0 ${px}px`, paddingBottom: `max(28px, calc(16px + env(safe-area-inset-bottom, 0px)))` }}>
+                <div style={{ fontSize: 13, color: T.sub, marginBottom: 18, lineHeight: 1.45 }}>
+                  Use the camera for a new shot, or pick a single photo from your library. Only one image is scanned at a time.
+                </div>
+                {scanErr ? (
+                  <div
+                    style={{
+                      background: T.ddim,
+                      border: "1px solid rgba(239,68,68,0.35)",
+                      borderRadius: T.r,
+                      padding: "10px 14px",
+                      marginBottom: 16,
+                      fontSize: 13,
+                      color: T.dng,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {scanErr}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => scanCameraRef.current?.click()}
+                  style={{
+                    ...card,
+                    width: "100%",
+                    marginBottom: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    cursor: "pointer",
+                    borderColor: T.blue,
+                    textAlign: "left",
+                    font: "inherit",
+                    color: "inherit",
+                  }}
+                >
+                  <div style={{ fontSize: 32 }}>📸</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>Take photo</div>
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Opens your camera</div>
+                  </div>
+                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scanGalleryRef.current?.click()}
+                  style={{
+                    ...card,
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    cursor: "pointer",
+                    borderColor: T.bdr,
+                    textAlign: "left",
+                    font: "inherit",
+                    color: "inherit",
+                  }}
+                >
+                  <div style={{ fontSize: 32 }}>🖼️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>Choose one photo</div>
+                    <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>From gallery — one image only</div>
+                  </div>
+                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                </button>
               </div>
             )}
 
@@ -2271,50 +2718,6 @@ export default function App() {
               </div>
             )}
 
-            {step === "processing" && (
-              <div style={{ padding: `48px ${px}px`, textAlign: "center" }}>
-                <div style={{ fontSize: 52, marginBottom: 16 }}>🔍</div>
-                <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Scanning with AI…</div>
-                <div style={{ fontSize: 13, color: T.sub, marginBottom: 22 }}>
-                  Use ← to cancel. Keep this tab open for best results.
-                </div>
-                <div style={{ textAlign: "left", maxWidth: 320, margin: "0 auto", fontSize: 13 }}>
-                  {(scanPhaseOrderRef.current.length
-                    ? scanPhaseOrderRef.current
-                    : ["read", "ai", "parse"]
-                  ).map((id, i, order) => {
-                    const labels = {
-                      read: "Reading file from your device",
-                      ocr: "Extracting text from file",
-                      ai: "Sending to OpenAI for analysis",
-                      parse: "Parsing total, category & lines",
-                    };
-                    const phase = order.includes(scanPhase) ? scanPhase : order[0];
-                    const idx = order.indexOf(phase);
-                    const done = idx > i;
-                    const active = phase === id;
-                    return (
-                      <div
-                        key={id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: "10px 0",
-                          borderBottom: i < order.length - 1 ? `1px solid ${T.bdr}` : "none",
-                          color: done || active ? T.txt : T.mut,
-                          fontWeight: active ? 700 : 500,
-                        }}
-                      >
-                        <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
-                        {labels[id] || id}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {step === "success" && (
               <div style={{ padding: `70px ${px}px`, textAlign: "center" }}>
                 <div
@@ -2364,10 +2767,29 @@ export default function App() {
                         color: T.acc,
                       }}
                     >
-                      ✓ AI filled the form — edit anything, then confirm below
+                      {scanFillPrompt || scanMissingFieldKeys.length
+                        ? "AI prefilled what it could — complete the missing fields below, then save."
+                        : "✓ AI filled the form — edit anything, then confirm below"}
                     </div>
                   </div>
                 )}
+
+                {scanFillPrompt ? (
+                  <div
+                    style={{
+                      background: "rgba(245,158,11,0.09)",
+                      border: "1px solid rgba(245,158,11,0.35)",
+                      borderRadius: T.r,
+                      padding: "10px 14px",
+                      marginBottom: 14,
+                      fontSize: 13,
+                      color: T.warn,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {scanFillPrompt}
+                  </div>
+                ) : null}
 
                 {scanLineItems && scanLineItems.length > 0 && (
                   <details
@@ -2708,14 +3130,50 @@ export default function App() {
                 ))}
               </div>
               {df === "custom" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
-                  <div>
-                    <label style={lbl}>From</label>
-                    <input type="date" value={cS} onChange={(e) => setCS(e.target.value)} style={inp} />
-                  </div>
-                  <div>
-                    <label style={lbl}>To</label>
-                    <input type="date" value={cE} onChange={(e) => setCE(e.target.value)} style={inp} />
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 14,
+                    borderRadius: T.r,
+                    border: `1px solid ${T.bdr}`,
+                    background: T.card2,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.sub, marginBottom: 12 }}>Date range</div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                      alignItems: "stretch",
+                    }}
+                  >
+                    {[
+                      { label: "From", value: cS, set: setCS },
+                      { label: "To", value: cE, set: setCE },
+                    ].map(({ label, value, set }) => (
+                      <div key={label} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                        <label style={{ ...lbl, marginBottom: 0 }}>{label}</label>
+                        <input
+                          type="date"
+                          value={value}
+                          onChange={(e) => set(e.target.value)}
+                          style={{
+                            ...inp,
+                            width: "100%",
+                            minWidth: 0,
+                            minHeight: 48,
+                            height: 48,
+                            fontSize: 16,
+                            lineHeight: 1.25,
+                            display: "block",
+                            flexShrink: 0,
+                            WebkitAppearance: "none",
+                            appearance: "none",
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -3006,10 +3464,102 @@ export default function App() {
                     ) : null}
                     .
                   </>
+                ) : monthlyBudgetTotal ? (
+                  "Add optional per-category limits below, or use only your overall cap (ring on Home)."
                 ) : (
-                  "Add one or more categories to see progress bars and alerts on Home."
+                  "Set an overall monthly cap (no category required) and/or limits per category — the cap appears on Home as a ring next to “This Month”."
                 )}
               </div>
+            </div>
+
+            <div style={{ margin: `0 ${px}px 14px` }}>
+              {monthlyBudgetTotal != null && monthlyBudgetTotal > 0 ? (
+                <div
+                  style={{
+                    ...card,
+                    marginBottom: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ fontSize: 26, lineHeight: 1 }} aria-hidden>
+                    🎯
+                  </div>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Overall monthly cap</div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>
+                      {formatMoney(monthTotal)} <span style={{ color: T.sub, fontWeight: 600 }}>/</span> {formatMoney(monthlyBudgetTotal)}
+                    </div>
+                    <div style={{ fontSize: 12, color: monthTotal > monthlyBudgetTotal ? T.dng : T.sub, marginTop: 2 }}>
+                      {monthTotal > monthlyBudgetTotal
+                        ? `${formatMoney(monthTotal - monthlyBudgetTotal)} over`
+                        : `${formatMoney(Math.max(0, monthlyBudgetTotal - monthTotal))} remaining`}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBmCat(MONTH_TOTAL_BUDGET_KEY);
+                        setBmAmt(String(monthlyBudgetTotal));
+                        setShowBM(true);
+                      }}
+                      style={{
+                        background: T.card2,
+                        border: `1px solid ${T.bdr}`,
+                        color: T.txt,
+                        borderRadius: T.r,
+                        padding: "8px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void removeMonthlyBudgetTotal()}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: T.dng,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        padding: "8px 4px",
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBmCat(MONTH_TOTAL_BUDGET_KEY);
+                    setBmAmt("");
+                    setShowBM(true);
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "14px 16px",
+                    borderRadius: T.r,
+                    border: `1px dashed ${T.bdr}`,
+                    background: "rgba(255,255,255,0.03)",
+                    color: T.txt,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  + Overall monthly cap (optional — no category)
+                </button>
+              )}
             </div>
 
             <div
@@ -3553,21 +4103,31 @@ export default function App() {
             }}
           >
             <div id="budget-sheet-title" style={{ fontSize: 17, fontWeight: 800, marginBottom: 18 }}>
-              {bmCat ? `Set Budget — ${bmCat}` : "Set Budget"}
+              {bmCat === MONTH_TOTAL_BUDGET_KEY
+                ? "Monthly spending cap"
+                : bmCat
+                  ? `Set Budget — ${bmCat}`
+                  : "Set Budget"}
             </div>
             <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>Category</label>
+              <label style={lbl}>{bmCat === MONTH_TOTAL_BUDGET_KEY ? "Applies to" : "Category"}</label>
               <select value={bmCat} onChange={(e) => setBmCat(e.target.value)} style={{ ...inp, appearance: "none" }}>
-                <option value="">Select category</option>
+                <option value="">Choose…</option>
+                <option value={MONTH_TOTAL_BUDGET_KEY}>All spending this month (overall cap)</option>
                 {categories.map((c) => (
                   <option key={c.n} value={c.n}>
                     {c.e} {c.n}
                   </option>
                 ))}
               </select>
+              {bmCat === MONTH_TOTAL_BUDGET_KEY ? (
+                <div style={{ fontSize: 12, color: T.sub, marginTop: 8, lineHeight: 1.45 }}>
+                  One limit for your total spending this month — no category needed. Progress appears on Home as a ring next to “This Month”.
+                </div>
+              ) : null}
             </div>
             <div style={{ marginBottom: 20 }}>
-              <label style={lbl}>Monthly Limit (₹)</label>
+              <label style={lbl}>Monthly limit</label>
               <input type="number" inputMode="decimal" placeholder="Enter amount" value={bmAmt} onChange={(e) => setBmAmt(e.target.value)} style={{ ...inp, fontSize: 20, fontWeight: 700 }} />
             </div>
             <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
@@ -3593,6 +4153,7 @@ export default function App() {
               </button>
               <button
                 type="button"
+                disabled={!bmAmt || isNaN(+bmAmt) || +bmAmt <= 0 || !bmCat}
                 onClick={() => void saveBudget()}
                 style={{
                   flex: 2,
@@ -3603,7 +4164,8 @@ export default function App() {
                   color: "#000",
                   fontSize: 14,
                   fontWeight: 700,
-                  cursor: "pointer",
+                  cursor: !bmAmt || isNaN(+bmAmt) || +bmAmt <= 0 || !bmCat ? "not-allowed" : "pointer",
+                  opacity: !bmAmt || isNaN(+bmAmt) || +bmAmt <= 0 || !bmCat ? 0.45 : 1,
                 }}
               >
                 Save Budget

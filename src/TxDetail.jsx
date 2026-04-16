@@ -46,7 +46,7 @@ export function TxDetail({
   const hasLineItems = Array.isArray(tx.lineItems) && tx.lineItems.length > 0;
   const hasTags = Array.isArray(tx.tags) && tx.tags.length > 0;
   const txAmt = Number(tx.amount) || 0;
-  const canEditSplit = typeof onSaveSplit === "function";
+  const canEditSplit = typeof onSaveSplit === "function" && !tx.syncedFromUid;
   const contacts = Array.isArray(splitContacts) ? splitContacts.map(normalizePerson).filter((p) => p.n) : [];
 
   function toggleSplitPerson(name) {

@@ -55,6 +55,38 @@ export function resolveScanAmount(ex) {
   return NaN;
 }
 
+const MISSING_FIELD_LABELS = {
+  total: "the total amount",
+  date: "the date",
+  category: "the category",
+  payment: "the payment method",
+  notes: "the merchant or notes",
+  line_items: "line-item detail",
+};
+
+/**
+ * User-facing copy when the model (or heuristics) flagged unreadable fields on a bill image.
+ * @param {string[]} missingFields keys: total | date | category | payment | notes | line_items
+ */
+export function formatMissingScanFieldsMessage(missingFields) {
+  if (!Array.isArray(missingFields) || !missingFields.length) return "";
+  const keys = [
+    ...new Set(
+      missingFields
+        .map((k) => String(k).trim().toLowerCase())
+        .map((k) => (k === "amount" ? "total" : k))
+        .filter((k) => MISSING_FIELD_LABELS[k])
+    ),
+  ];
+  const nouns = keys.map((k) => MISSING_FIELD_LABELS[k]);
+  if (!nouns.length) return "";
+  if (nouns.length === 1) {
+    return `We couldn’t read ${nouns[0]} from this bill. Please enter it below before saving.`;
+  }
+  const list = `${nouns.slice(0, -1).join(", ")}, and ${nouns[nouns.length - 1]}`;
+  return `We couldn’t read ${list} from this bill. Please fill in those details below before saving.`;
+}
+
 /**
  * Map AI output + catalog to form fields.
  * @param {Record<string, unknown>} raw
@@ -62,32 +94,54 @@ export function resolveScanAmount(ex) {
  */
 export function normalizeScanResult(raw, ctx) {
   const { categoryNames, payments, defaultPayment, defaultDate } = ctx;
-  const amount = resolveScanAmount(raw);
-  const catRaw = raw && typeof raw === "object" ? raw.category : "";
-  const matchedCat =
-    typeof catRaw === "string" && catRaw.trim()
-      ? matchCatalogName(catRaw, categoryNames)
-      : null;
-  const category = matchedCat || (categoryNames[0] ?? "");
 
-  const payRaw = raw && typeof raw === "object" ? raw.payment : "";
-  const matchedPay =
-    typeof payRaw === "string" && payRaw.trim() ? matchCatalogName(payRaw, payments) : null;
-  const payment = matchedPay || defaultPayment || (payments[0] ?? "");
+  const rawObj = raw && typeof raw === "object" ? raw : {};
+  const mfRaw = rawObj.missing_fields ?? rawObj.missingFields;
+  let missingFields = Array.isArray(mfRaw)
+    ? mfRaw.map((x) => String(x).trim().toLowerCase().replace(/^amount$/, "total")).filter(Boolean)
+    : [];
+
+  const amount = resolveScanAmount(raw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    if (!missingFields.includes("total")) missingFields.push("total");
+  }
+
+  const categoryMissing = missingFields.includes("category");
+  const paymentMissing = missingFields.includes("payment");
+  const dateMissing = missingFields.includes("date");
+  const notesMissing = missingFields.includes("notes");
+  const lineItemsMissing = missingFields.includes("line_items");
+
+  const catRaw = rawObj.category;
+  let matchedCat = null;
+  if (!categoryMissing && typeof catRaw === "string" && catRaw.trim()) {
+    matchedCat = matchCatalogName(catRaw, categoryNames);
+  }
+  const category = categoryMissing ? "" : matchedCat || (categoryNames[0] ?? "");
+
+  const payRaw = rawObj.payment;
+  let matchedPay = null;
+  if (!paymentMissing && typeof payRaw === "string" && payRaw.trim()) {
+    matchedPay = matchCatalogName(payRaw, payments);
+  }
+  const payment = paymentMissing ? "" : matchedPay || defaultPayment || (payments[0] ?? "");
 
   let date = "";
-  if (raw && typeof raw === "object" && typeof raw.date === "string" && raw.date.trim()) {
-    date = raw.date.trim();
+  if (dateMissing) {
+    date = "";
+  } else if (typeof rawObj.date === "string" && rawObj.date.trim()) {
+    date = rawObj.date.trim();
   } else {
     date = defaultDate;
   }
 
   let notes = "";
-  if (raw && typeof raw === "object" && raw.notes != null) {
-    notes = String(raw.notes).trim();
+  if (!notesMissing && rawObj.notes != null) {
+    notes = String(rawObj.notes).trim();
   }
 
-  const lineItems = raw && typeof raw === "object" && Array.isArray(raw.line_items) ? raw.line_items : null;
+  const lineItems =
+    lineItemsMissing || !Array.isArray(rawObj.line_items) ? null : rawObj.line_items;
 
   return {
     amount: Number.isFinite(amount) && amount > 0 ? String(Math.round(amount * 100) / 100) : "",
@@ -96,5 +150,6 @@ export function normalizeScanResult(raw, ctx) {
     payment,
     notes,
     lineItems,
+    missingFields,
   };
 }

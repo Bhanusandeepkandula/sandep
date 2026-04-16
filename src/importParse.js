@@ -9,9 +9,16 @@ function normKey(h) {
     .replace(/[^a-z0-9_]/g, "");
 }
 
-const AMOUNT_KEYS = ["amount", "amt", "debit", "credit", "total", "value", "sum"];
+/** Single amount column (do not include separate debit/credit columns here — handled below). */
+const AMOUNT_KEYS = ["amount", "amt", "total", "value", "sum", "balance_amount"];
+/** Money out (expense) — bank-style columns */
+const DEBIT_COLUMN_KEYS = ["withdrawal", "debit_amount", "debit", "dr_amount", "dr", "paid_out", "outflow", "withdrawals"];
+/** Money in (income) — if this is the only amount on the row, skip as expense */
+const CREDIT_COLUMN_KEYS = ["deposit", "credit_amount", "credit", "cr_amount", "cr", "paid_in", "inflow", "deposits"];
+/** Dr/Cr / income vs expense hint (not merchant category) */
+const FLOW_KEYS = ["flow", "entry_type", "transaction_type", "txn_type", "dr_cr", "dc", "indicator"];
 const DATE_KEYS = ["date", "txn_date", "transaction_date", "posted", "posted_date", "when"];
-const CAT_KEYS = ["category", "cat", "type", "expense_category"];
+const CAT_KEYS = ["category", "cat", "type", "expense_category", "merchant_category"];
 const PAY_KEYS = ["payment", "pay", "method", "payment_method", "account"];
 const NOTES_KEYS = ["notes", "description", "memo", "merchant", "payee", "details", "narration"];
 const TAGS_KEYS = ["tags", "tag", "labels"];
@@ -32,12 +39,41 @@ function pick(rec, keys) {
 
 /** @param {string} s */
 export function parseAmount(s) {
-  const t = String(s)
-    .replace(/[₹$€£,\s]/g, "")
-    .replace(/[^\d.-]/g, "");
-  const n = parseFloat(t);
+  const n = parseAmountSigned(s);
   if (!Number.isFinite(n) || n === 0) return NaN;
   return Math.abs(n);
+}
+
+/**
+ * Parses a possibly signed amount; parentheses often mean negative (credit) on statements.
+ * @param {string} s
+ * @returns {number}
+ */
+export function parseAmountSigned(s) {
+  if (s === undefined || s === null) return NaN;
+  let t = String(s).trim();
+  if (!t) return NaN;
+  const parenNeg = /^\(.*\)$/.test(t.replace(/\s/g, ""));
+  t = t.replace(/[₹$€£,\s]/g, "");
+  if (parenNeg) {
+    t = "-" + t.replace(/[()]/g, "");
+  }
+  t = t.replace(/[^\d.-]/g, "");
+  const n = parseFloat(t);
+  if (!Number.isFinite(n) || n === 0) return NaN;
+  return n;
+}
+
+/**
+ * @param {string} raw
+ * @returns {boolean} true = bank labels this row as money in (skip as expense)
+ */
+function isIncomeFlowCell(raw) {
+  const x = String(raw).trim().toLowerCase();
+  if (!x) return false;
+  if (/^(credit|cr|c|deposit|income|inward|received|salary|interest|dividend)$/.test(x)) return true;
+  if (/^(debit|dr|d|withdrawal|expense|paid|out)$/.test(x)) return false;
+  return false;
 }
 
 /** @param {string} input */
@@ -165,14 +201,45 @@ export function parseExpenseCsv(csvText, catalogLists) {
       rec[normKey(k)] = v;
     }
 
-    const amtStr = pick(rec, AMOUNT_KEYS);
+    const flowStr = pick(rec, FLOW_KEYS);
     const dateStr = pick(rec, DATE_KEYS);
     const catStr = pick(rec, CAT_KEYS);
     const payStr = pick(rec, PAY_KEYS);
     const notesStr = pick(rec, NOTES_KEYS);
     const tagsStr = pick(rec, TAGS_KEYS);
 
-    const amount = parseAmount(amtStr);
+    const debitStr = pick(rec, DEBIT_COLUMN_KEYS);
+    const creditStr = pick(rec, CREDIT_COLUMN_KEYS);
+    const singleAmtStr = pick(rec, AMOUNT_KEYS);
+
+    let amount = NaN;
+    let incomeExcluded = false;
+
+    if (flowStr && isIncomeFlowCell(flowStr)) {
+      incomeExcluded = true;
+    } else {
+      const hasDebitCol = Boolean(debitStr && String(debitStr).trim());
+      const hasCreditCol = Boolean(creditStr && String(creditStr).trim());
+      if (hasDebitCol || hasCreditCol) {
+        const da = hasDebitCol ? parseAmountSigned(debitStr) : NaN;
+        const ca = hasCreditCol ? parseAmountSigned(creditStr) : NaN;
+        const dAbs = Number.isFinite(da) ? Math.abs(da) : 0;
+        const cAbs = Number.isFinite(ca) ? Math.abs(ca) : 0;
+        if (dAbs > 0) {
+          amount = dAbs;
+        } else if (cAbs > 0) {
+          incomeExcluded = true;
+        }
+      } else {
+        const signed = parseAmountSigned(singleAmtStr);
+        if (Number.isFinite(signed) && signed < 0) {
+          incomeExcluded = true;
+        } else if (Number.isFinite(signed) && signed > 0) {
+          amount = signed;
+        }
+      }
+    }
+
     const dateIso = dateStr ? parseDateToISO(dateStr) : null;
     const cat = catStr ? matchCatalogName(catStr, categories) : null;
     const pay = payStr ? matchCatalogName(payStr, payments) : defaultPay;
@@ -188,7 +255,9 @@ export function parseExpenseCsv(csvText, catalogLists) {
     if (allEmpty) continue;
 
     let error = "";
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (incomeExcluded) {
+      error = "Excluded: credit / income (not counted as expense)";
+    } else if (!Number.isFinite(amount) || amount <= 0) {
       error = "Missing or invalid amount";
     } else if (!dateIso) {
       error = "Missing or invalid date";

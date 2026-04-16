@@ -1,0 +1,113 @@
+/**
+ * Mirrors split expenses to linked friends' Firestore accounts so both parties see the same bill.
+ * Requires: split people matched to Profile contacts that include profile id (u) from QR scan,
+ * and both users have opened the app once so peerProfileIndex maps profile id → Firebase uid.
+ */
+import { doc, getDoc, setDoc, writeBatch } from "firebase/firestore";
+import { normalizePerson } from "./splitContactShare.js";
+
+export const PEER_PROFILE_INDEX = "peerProfileIndex";
+
+function sanitize(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * Attach profile ids from split contacts so we can resolve peers in Firestore.
+ * @param {{ type?: string; people: Array<{ n: string; a: number }> } | null} split
+ * @param {unknown[]} contactsArr
+ */
+export function enrichSplitPeopleFromContacts(split, contactsArr) {
+  if (!split?.people?.length) return split;
+  const contacts = (contactsArr || []).map(normalizePerson).filter((p) => p.n);
+  return {
+    ...split,
+    people: split.people.map((p) => {
+      const c = contacts.find((x) => x.n === p.n);
+      const n = String(p.n || "").trim();
+      const a = typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0;
+      const out = { n, a };
+      if (c?.u) out.u = c.u;
+      if (c?.e) out.e = c.e;
+      return out;
+    }),
+  };
+}
+
+/** Publish mapping appProfileUuid → Firebase uid so friends can mirror transactions to this account. */
+export async function publishPeerProfileIndex(db, firebaseUid, appProfileUuid) {
+  const id = String(appProfileUuid || "").trim();
+  if (!id || !firebaseUid) return;
+  try {
+    await setDoc(doc(db, PEER_PROFILE_INDEX, id), { uid: firebaseUid, updatedAt: Date.now() }, { merge: true });
+  } catch (e) {
+    console.error("publishPeerProfileIndex", e);
+  }
+}
+
+export async function resolvePeerUid(db, appProfileUuid) {
+  const id = String(appProfileUuid || "").trim();
+  if (!id) return null;
+  try {
+    const snap = await getDoc(doc(db, PEER_PROFILE_INDEX, id));
+    const u = snap.data()?.uid;
+    return typeof u === "string" && u.trim().length ? u.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Firebase UIDs of peers linked via split.people[].u (excluding the owner). */
+export async function collectPeerUidsForSplit(db, split, ownerUid) {
+  if (!split?.people?.length) return [];
+  const seen = new Set();
+  const out = [];
+  for (const p of split.people) {
+    const uuid = typeof p.u === "string" ? p.u.trim() : "";
+    if (!uuid) continue;
+    const peer = await resolvePeerUid(db, uuid);
+    if (peer && peer !== ownerUid && !seen.has(peer)) {
+      seen.add(peer);
+      out.push(peer);
+    }
+  }
+  return out;
+}
+
+/** Peer copy: same fields; receipt stays on payer’s Storage — omit for peers (rules / ACL). */
+export function buildMirrorTransaction(tx, syncedFromUid) {
+  const copy = { ...tx, syncedFromUid };
+  if (copy.receiptUrl) delete copy.receiptUrl;
+  return copy;
+}
+
+export async function upsertSplitMirrors(db, ownerUid, tx) {
+  if (!tx?.id || !tx?.split?.people?.length) return;
+  const peers = await collectPeerUidsForSplit(db, tx.split, ownerUid);
+  if (!peers.length) return;
+  const mirror = buildMirrorTransaction(tx, ownerUid);
+  const payload = sanitize(mirror);
+  for (const peerUid of peers) {
+    try {
+      await setDoc(doc(db, "users", peerUid, "transactions", tx.id), payload);
+    } catch (e) {
+      console.error("upsertSplitMirrors", peerUid, e);
+    }
+  }
+}
+
+/** Remove mirrored copies from peers’ libraries (before updating split or deleting the expense). */
+export async function deleteMirrorsForOwnerTransaction(db, ownerUid, tx) {
+  if (!tx?.id) return;
+  const peers = await collectPeerUidsForSplit(db, tx.split, ownerUid);
+  if (!peers.length) return;
+  const batch = writeBatch(db);
+  for (const peerUid of peers) {
+    batch.delete(doc(db, "users", peerUid, "transactions", tx.id));
+  }
+  try {
+    await batch.commit();
+  } catch (e) {
+    console.error("deleteMirrorsForOwnerTransaction", e);
+  }
+}

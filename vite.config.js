@@ -132,6 +132,7 @@ Column rules:
 
 Data rules:
 - Emit ONE data row per purchased line item (dishes, drinks, packaged goods the customer bought). Do NOT emit rows for: Grand Total, Subtotal, Total, Tax, GST, SGST, CGST, Service Charge, Packing Charge, Discount lines that are not a product, header/footer text, address, phone, GSTIN.
+- For bank or card **statements**: only include **debits / purchases / money OUT**. Do NOT emit rows for salary, deposits, credits, interest received, or transfers IN — those are not expenses for this import.
 - Ignore duplicate repeated lines.
 - Fix obvious OCR typos in notes.
 - If there are no line items, output the header row only.`;

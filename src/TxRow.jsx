@@ -87,6 +87,12 @@ export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLoc
             <span>{fDate(tx.date, dateLocale)}</span>
             <span>·</span>
             <span>{tx.payment}</span>
+            {tx.syncedFromUid ? (
+              <>
+                <span>·</span>
+                <span style={{ color: T.blue }} title="Synced from a split contact">Synced</span>
+              </>
+            ) : null}
             {tx.split && (
               <>
                 <span>·</span>

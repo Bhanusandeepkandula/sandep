@@ -58,7 +58,7 @@ import {
   updateDoc,
   deleteField,
 } from "firebase/firestore";
-import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
+import { onAuthStateChanged, signOut, signInWithEmailAndPassword, deleteUser as fbDeleteUser, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
 import { FALLBACK_CATALOG, offlineStorageKey, FIXED_EXPENSE_TEMPLATES } from "./fallbackCatalog.js";
 import AuthGate from "./AuthGate.jsx";
@@ -340,6 +340,10 @@ export default function App({ onReady }) {
   const [deleteAllPin, setDeleteAllPin] = useState("");
   const [deleteAllErr, setDeleteAllErr] = useState("");
   const [deleteAllBusy, setDeleteAllBusy] = useState(false);
+  const [deleteAcctModal, setDeleteAcctModal] = useState(false);
+  const [deleteAcctPin, setDeleteAcctPin] = useState("");
+  const [deleteAcctErr, setDeleteAcctErr] = useState("");
+  const [deleteAcctBusy, setDeleteAcctBusy] = useState(false);
   const [dataToast, setDataToast] = useState("");
   const [showProfileQr, setShowProfileQr] = useState(false);
   const [profileQrCopied, setProfileQrCopied] = useState(false);
@@ -1035,6 +1039,45 @@ export default function App({ onReady }) {
       }
     } finally {
       setDeleteAllBusy(false);
+    }
+  }
+
+  async function confirmDeleteAccount() {
+    setDeleteAcctErr("");
+    const email = firebaseUser?.email;
+    if (!email) { setDeleteAcctErr("Not signed in."); return; }
+    if (!isValidPin(deleteAcctPin)) { setDeleteAcctErr("Enter your 4-digit PIN."); return; }
+    setDeleteAcctBusy(true);
+    try {
+      const cred = EmailAuthProvider.credential(email, pinToPassword(deleteAcctPin));
+      await reauthenticateWithCredential(auth.currentUser, cred);
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error("No user after re-auth.");
+
+      const txSnap = await getDocs(collection(db, "users", uid, "transactions"));
+      for (let i = 0; i < txSnap.docs.length; i += 450) {
+        const batch = writeBatch(db);
+        for (const d of txSnap.docs.slice(i, i + 450)) batch.delete(d.ref);
+        await batch.commit();
+      }
+      try { await deleteDoc(doc(db, "users", uid, "settings", "config")); } catch {}
+      try { await deleteDoc(doc(db, "users", uid)); } catch {}
+
+      await fbDeleteUser(auth.currentUser);
+      setDeleteAcctModal(false);
+      setDeleteAcctPin("");
+      setTxs([]);
+    } catch (e) {
+      const code = e?.code || "";
+      if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") {
+        setDeleteAcctErr("Wrong PIN.");
+      } else if (code === "auth/requires-recent-login") {
+        setDeleteAcctErr("Session expired. Sign out and back in, then try again.");
+      } else {
+        setDeleteAcctErr(e?.message || String(e));
+      }
+    } finally {
+      setDeleteAcctBusy(false);
     }
   }
 
@@ -4505,12 +4548,24 @@ export default function App({ onReady }) {
                 type="button"
                 disabled={!firebaseUser?.email || fbStatus !== "ready"}
                 onClick={() => { setDeleteAllErr(""); setDeleteAllPin(""); setDeleteAllModal(true); }}
-                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}66`, background: T.ddim, cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
+                style={{ width: "100%", marginBottom: 10, padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}66`, background: T.ddim, cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
               >
                 <Trash2 size={18} color={T.dng} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: T.dng }}>Delete all expenses</div>
                   <div style={{ fontSize: 11, color: T.sub }}>{txs.length} transactions · requires PIN</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                disabled={!firebaseUser?.email || fbStatus !== "ready"}
+                onClick={() => { setDeleteAcctErr(""); setDeleteAcctPin(""); setDeleteAcctModal(true); }}
+                style={{ width: "100%", padding: "12px 12px", borderRadius: T.r, border: `1px solid ${T.dng}`, background: T.dng, cursor: !firebaseUser?.email || fbStatus !== "ready" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left", opacity: !firebaseUser?.email || fbStatus !== "ready" ? 0.5 : 1 }}
+              >
+                <Trash2 size={18} color="#fff" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Delete account</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>Permanently remove all data & account</div>
                 </div>
               </button>
             </div>
@@ -5058,6 +5113,63 @@ export default function App({ onReady }) {
                 }}
               >
                 {deleteAllBusy ? "Deleting…" : "Delete all"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteAcctModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-acct-title"
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 520, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={(e) => { if (e.target === e.currentTarget && !deleteAcctBusy) { setDeleteAcctModal(false); setDeleteAcctPin(""); setDeleteAcctErr(""); } }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: T.card, borderRadius: T.rLg, padding: 22, border: `1px solid ${T.dng}`, boxSizing: "border-box" }}>
+            <div id="delete-acct-title" style={{ fontSize: 17, fontWeight: 800, marginBottom: 8, color: T.dng }}>
+              Delete your account?
+            </div>
+            <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 6 }}>
+              This will <strong style={{ color: T.dng }}>permanently</strong> delete:
+            </div>
+            <ul style={{ fontSize: 13, color: T.sub, lineHeight: 1.6, margin: "0 0 14px 18px", padding: 0 }}>
+              <li>All {txs.length} transaction{txs.length === 1 ? "" : "s"}</li>
+              <li>Budgets, settings & preferences</li>
+              <li>Your login account</li>
+            </ul>
+            <div style={{ fontSize: 12, color: T.warn, background: T.wdim, borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.4 }}>
+              This cannot be undone. You will need to create a new account to use the app again.
+            </div>
+            <label style={lbl}>Enter PIN to confirm</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={4}
+              value={deleteAcctPin}
+              onChange={(e) => { setDeleteAcctPin(e.target.value.replace(/\D/g, "").slice(0, 4)); setDeleteAcctErr(""); }}
+              placeholder="••••"
+              style={{ ...inp, marginBottom: deleteAcctErr ? 8 : 16, letterSpacing: 6, fontSize: 18 }}
+            />
+            {deleteAcctErr ? <div style={{ fontSize: 13, color: T.dng, marginBottom: 12 }}>{deleteAcctErr}</div> : null}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                disabled={deleteAcctBusy}
+                onClick={() => { if (!deleteAcctBusy) { setDeleteAcctModal(false); setDeleteAcctPin(""); setDeleteAcctErr(""); } }}
+                style={{ flex: 1, padding: 14, borderRadius: T.r, border: `1px solid ${T.bdr}`, background: "transparent", color: T.sub, fontSize: 14, fontWeight: 600, cursor: deleteAcctBusy ? "not-allowed" : "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteAcctBusy || deleteAcctPin.length !== 4}
+                onClick={() => void confirmDeleteAccount()}
+                style={{ flex: 1, padding: 14, borderRadius: T.r, border: "none", background: T.dng, color: "#fff", fontSize: 14, fontWeight: 800, cursor: deleteAcctBusy || deleteAcctPin.length !== 4 ? "not-allowed" : "pointer", opacity: deleteAcctPin.length === 4 ? 1 : 0.65 }}
+              >
+                {deleteAcctBusy ? "Deleting…" : "Delete account"}
               </button>
             </div>
           </div>

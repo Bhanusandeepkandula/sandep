@@ -1,11 +1,9 @@
-import { useState } from "react";
-import { MoreVertical, Trash2, ImageIcon } from "lucide-react";
+import { Trash2, ImageIcon } from "lucide-react";
 import { T } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 
 export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
   const cat = getCat(categories, tx.category);
-  const [open, setOpen] = useState(false);
   return (
     <div
       style={{
@@ -15,7 +13,6 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
         padding: "11px 0",
         borderBottom: `1px solid ${T.bdr}`,
         position: "relative",
-        overflow: "visible",
       }}
     >
       <div
@@ -30,7 +27,6 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
           fontSize: 20,
           flexShrink: 0,
           position: "relative",
-          overflow: "visible",
         }}
       >
         {cat.e}
@@ -89,47 +85,26 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
       </div>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
-        style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 4, flexShrink: 0 }}
+        onClick={() => onDelete(tx.id)}
+        title="Delete"
+        style={{
+          background: "none",
+          border: "none",
+          color: T.dng,
+          cursor: "pointer",
+          padding: 6,
+          flexShrink: 0,
+          opacity: 0.6,
+          borderRadius: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
       >
-        <MoreVertical size={15} />
+        <Trash2 size={15} />
       </button>
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: "100%",
-            background: T.card2,
-            border: `1px solid ${T.bdr}`,
-            borderRadius: 10,
-            zIndex: 50,
-            minWidth: 100,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              onDelete(tx.id);
-              setOpen(false);
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 16px",
-              background: "none",
-              border: "none",
-              color: T.dng,
-              cursor: "pointer",
-              fontSize: 13,
-              width: "100%",
-            }}
-          >
-            <Trash2 size={13} /> Delete
-          </button>
-        </div>
-      )}
     </div>
   );
 }

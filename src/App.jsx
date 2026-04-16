@@ -39,6 +39,7 @@ import {
   ImageIcon,
   FileText,
   Palette,
+  BrainCircuit,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { T, card, card2, inp, lbl, pill, THEMES, applyTheme } from "./config.js";
@@ -2174,8 +2175,9 @@ export default function App({ onReady }) {
                 <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
                 <div style={{ fontSize: comfortable ? 26 : 22, fontWeight: 800, marginTop: 2 }}>My Expenses</div>
               </div>
-              <div
-                title="Notifications"
+              <button
+                type="button"
+                onClick={() => setTab("profile")}
                 style={{
                   width: 40,
                   height: 40,
@@ -2188,8 +2190,8 @@ export default function App({ onReady }) {
                   cursor: "pointer",
                 }}
               >
-                <Bell size={17} color={T.sub} />
-              </div>
+                <User size={17} color={T.sub} />
+              </button>
             </div>
 
             <div
@@ -3944,6 +3946,17 @@ export default function App({ onReady }) {
               </div>
             )}
 
+          </div>
+        )}
+
+        {/* ═══════════════════ REPORTS TAB ═══════════════════ */}
+        {tab === "reports" && (
+          <div>
+            <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
+              <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 4 }}>AI Reports</div>
+              <div style={{ fontSize: 13, color: T.sub, marginBottom: 14 }}>Spending analysis, trends & smart insights</div>
+            </div>
+
             <SpendingReport
               txs={txs}
               categories={categories}
@@ -3959,68 +3972,74 @@ export default function App({ onReady }) {
             />
 
             <div style={{ padding: `0 ${px}px 16px` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
-                  <Sparkles size={17} color={T.acc} /> AI Insights
+              <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
+                    <Sparkles size={17} color={T.purp} /> AI Insights
+                  </div>
+                  <button
+                    type="button"
+                    onClick={genTips}
+                    disabled={ldTips}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 14px",
+                      borderRadius: 10,
+                      border: `1px solid ${T.purp}`,
+                      background: T.pdim,
+                      color: T.purp,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {ldTips ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
+                    {ldTips ? "Analyzing…" : "Generate Tips"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={genTips}
-                  disabled={ldTips}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "8px 14px",
-                    borderRadius: 10,
-                    border: `1px solid ${T.acc}`,
-                    background: T.adim,
-                    color: T.acc,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {ldTips ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
-                  {ldTips ? "Analyzing…" : "Generate Tips"}
-                </button>
-              </div>
 
-              {tips.length > 0 ? (
-                tips.map((tip, i) => (
-                  <div key={i} style={{ ...card, marginBottom: 10, borderLeft: `3px solid ${tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc}` }}>
-                    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                      <div style={{ fontSize: 26 }}>{tip.icon}</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{tip.title}</div>
-                        <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>{tip.desc}</div>
-                        <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 11, background: T.adim, color: T.acc, borderRadius: 6, padding: "2px 8px" }}>💰 Save {tip.saving}</span>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              borderRadius: 6,
-                              padding: "2px 8px",
-                              background: tip.priority === "high" ? T.ddim : tip.priority === "medium" ? T.wdim : T.adim,
-                              color: tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc,
-                            }}
-                          >
-                            {tip.priority} priority
-                          </span>
+                {tips.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {tips.map((tip, i) => (
+                      <div key={i} style={{ background: T.card2, borderRadius: 12, padding: 14, borderLeft: `3px solid ${tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc}` }}>
+                        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                          <div style={{ fontSize: 26 }}>{tip.icon}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{tip.title}</div>
+                            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>{tip.desc}</div>
+                            <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 11, background: T.adim, color: T.acc, borderRadius: 6, padding: "2px 8px" }}>Save {tip.saving}</span>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  borderRadius: 6,
+                                  padding: "2px 8px",
+                                  background: tip.priority === "high" ? T.ddim : tip.priority === "medium" ? T.wdim : T.adim,
+                                  color: tip.priority === "high" ? T.dng : tip.priority === "medium" ? T.warn : T.acc,
+                                }}
+                              >
+                                {tip.priority} priority
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center", padding: "20px 0 10px" }}>
+                    <div style={{ width: 52, height: 52, borderRadius: 16, background: T.pdim, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                      <BrainCircuit size={24} color={T.purp} />
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>AI-Powered Expense Advisor</div>
+                    <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.6 }}>
+                      {`Tap "Generate Tips" to get personalised tips based on your actual spending patterns`}
                     </div>
                   </div>
-                ))
-              ) : (
-                <div style={{ ...card, textAlign: "center", padding: 32 }}>
-                  <div style={{ fontSize: 44, marginBottom: 12 }}>🤖</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>AI-Powered Expense Advisor</div>
-                  <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.6 }}>
-                    {`Tap "Generate Tips" to get personalised tips based on your actual spending patterns`}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -5079,11 +5098,11 @@ export default function App({ onReady }) {
         }}
       >
         {[
-          { id: "home", icon: <Home size={21} />, label: "Home" },
-          { id: "analytics", icon: <BarChart2 size={21} />, label: "Analytics" },
+          { id: "home", icon: <Home size={20} />, label: "Home" },
+          { id: "analytics", icon: <BarChart2 size={20} />, label: "Analytics" },
           { id: "ADD", icon: null, label: "" },
-          { id: "budgets", icon: <Wallet size={21} />, label: "Budgets" },
-          { id: "profile", icon: <User size={21} />, label: "Profile" },
+          { id: "reports", icon: <BrainCircuit size={20} />, label: "Reports" },
+          { id: "budgets", icon: <Wallet size={20} />, label: "Budgets" },
         ].map((item) => {
           if (item.id === "ADD")
             return (

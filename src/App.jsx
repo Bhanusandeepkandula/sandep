@@ -37,6 +37,7 @@ import {
   ClipboardList,
   Camera,
   ImageIcon,
+  FileText,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { T, card, card2, inp, lbl, pill } from "./config.js";
@@ -85,6 +86,7 @@ import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import { CategoryIcon } from "./categoryIcons.jsx";
+import { SpendingReport } from "./SpendingReport.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -308,6 +310,7 @@ export default function App({ onReady }) {
   const [userPayments, setUserPayments] = useState(null);
   const [userCurrency, setUserCurrency] = useState(null);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [reportFreq, setReportFreq] = useState("weekly");
 
   const [fbStatus, setFbStatus] = useState("loading");
   const [fbErrorDetail, setFbErrorDetail] = useState("");
@@ -570,6 +573,7 @@ export default function App({ onReady }) {
           else setUserPayments(null);
           if (d.userCurrency && typeof d.userCurrency === "object" && d.userCurrency.code) setUserCurrency(d.userCurrency);
           else setUserCurrency(null);
+          if (typeof d.reportFreq === "string" && ["daily", "weekly", "monthly"].includes(d.reportFreq)) setReportFreq(d.reportFreq);
           if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
             setTips(d.aiInsights.items);
             setAiInsightsUpdatedAt(
@@ -609,6 +613,7 @@ export default function App({ onReady }) {
               if (Array.isArray(o.userCategories) && o.userCategories.length > 0) setUserCategories(o.userCategories);
               if (Array.isArray(o.userPayments) && o.userPayments.length > 0) setUserPayments(o.userPayments);
               if (o.userCurrency && typeof o.userCurrency === "object" && o.userCurrency.code) setUserCurrency(o.userCurrency);
+              if (typeof o.reportFreq === "string") setReportFreq(o.reportFreq);
             } else {
               setTxs([]);
               setBudgets({});
@@ -1965,6 +1970,17 @@ export default function App({ onReady }) {
   }
 
   const fixedTotal = fixedExpenses.reduce((s, f) => s + (f.amount || 0), 0);
+
+  async function saveReportFreq(freq) {
+    setReportFreq(freq);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { reportFreq: freq }, { merge: true });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
 
   async function saveUserCurrency(cur) {
     setUserCurrency(cur);
@@ -3905,6 +3921,20 @@ export default function App({ onReady }) {
               </div>
             )}
 
+            <SpendingReport
+              txs={txs}
+              categories={categories}
+              formatMoney={formatMoney}
+              currencyCode={currencyCode}
+              budgets={budgets}
+              catSpent={catSpent}
+              fixedTotal={fixedTotal}
+              monthlyBudgetTotal={monthlyBudgetTotal}
+              uid={uidRef.current}
+              reportFreq={reportFreq}
+              px={px}
+            />
+
             <div style={{ padding: `0 ${px}px 16px` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
@@ -4430,11 +4460,27 @@ export default function App({ onReady }) {
               </button>
               {(() => {
                 const activeCur = CURRENCIES.find((c) => c.code === currencyCode) || CURRENCIES[0];
+                const freqLabel = { daily: "Daily", weekly: "Weekly (Mon)", monthly: "Monthly (1st)" }[reportFreq] || "Weekly";
                 const settingsRows = [
-                  { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null },
-                  { Icon: RefreshCw, label: "Currency", sub: `${activeCur.flag} ${activeCur.code} ${activeCur.symbol}`, color: T.acc, onClick: () => setShowCurrencyPicker(true) },
-                  { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue, onClick: null },
-                  { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp, onClick: null },
+                  { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null, right: null },
+                  { Icon: RefreshCw, label: "Currency", sub: `${activeCur.flag} ${activeCur.code} ${activeCur.symbol}`, color: T.acc, onClick: () => setShowCurrencyPicker(true), right: null },
+                  {
+                    Icon: FileText, label: "Report Frequency", sub: `Auto-generate: ${freqLabel}`, color: T.purp, onClick: null,
+                    right: (
+                      <select
+                        value={reportFreq}
+                        onChange={(e) => void saveReportFreq(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    ),
+                  },
+                  { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue, onClick: null, right: null },
+                  { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp, onClick: null, right: null },
                 ];
                 return settingsRows.map((item, i) => (
                   <div key={i} role={item.onClick ? "button" : undefined} tabIndex={item.onClick ? 0 : undefined} onClick={item.onClick || undefined} onKeyDown={item.onClick ? (e) => { if (e.key === "Enter" || e.key === " ") item.onClick(); } : undefined} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < settingsRows.length - 1 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
@@ -4445,7 +4491,7 @@ export default function App({ onReady }) {
                       <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
                       <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
                     </div>
-                    <ChevronRight size={16} color={T.mut} />
+                    {item.right || <ChevronRight size={16} color={T.mut} />}
                   </div>
                 ));
               })()}

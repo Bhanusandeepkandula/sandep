@@ -1232,25 +1232,46 @@ export default function App({ onReady }) {
             byUid: uidRef.current,
             byName: profileName || "",
           };
-          /* Try to flush any older queued writes first so they don't get
-           * stuck behind this new one. */
+          /* Flush any older queued writes first so they don't get stuck
+           * behind this new one. */
           void flushPendingPeerWrites();
+          /* Surface the exact write path in console so users can verify the
+           * payer's Firestore rules allow `settlements[slaveUid]` updates.
+           * If this throws permission-denied the rules need a deploy. */
+          console.info(
+            "[settle] slave→master push",
+            { txId, masterUid, slaveUid: uidRef.current, amount: entry.amount, full: entry.full }
+          );
           try {
             await setDoc(
               doc(db, "users", masterUid, "transactions", txId),
               { settlements: { [uidRef.current]: sanitizeForFirestore(entry) } },
               { merge: true }
             );
+            console.info("[settle] slave→master push OK");
           } catch (masterErr) {
-            console.warn("saveSettlement: master push failed, queueing for auto-retry:", masterErr);
+            console.error("[settle] slave→master push FAILED", {
+              code: masterErr?.code,
+              message: masterErr?.message,
+              masterUid,
+              txId,
+            });
             enqueuePendingPeerWrite({ op: "set", txId, masterUid, entry });
-            if (
+            /* Retry immediately after 1.5s in case it was a transient
+             * network/auth blip rather than a rule denial. */
+            setTimeout(() => void flushPendingPeerWrites(), 1500);
+            const permDenied =
               masterErr?.code === "permission-denied" ||
-              String(masterErr?.message || "").includes("insufficient permissions")
-            ) {
+              String(masterErr?.message || "").includes("insufficient permissions");
+            if (permDenied) {
               dlg.toast(
-                "Saved locally. We'll push it to the payer automatically as soon as their permissions allow.",
-                { type: "warn", duration: 6000, title: "Syncing in background" }
+                "Firestore rules reject cross-user writes. Deploy rules (see scripts/deploy-rules.sh) so the payer sees your payment.",
+                { type: "error", duration: 9000, title: "Payer sync blocked by rules" }
+              );
+            } else {
+              dlg.toast(
+                `Saved locally. Auto-retrying sync to the payer… (${masterErr?.code || "network"})`,
+                { type: "warn", duration: 5000, title: "Syncing in background" }
               );
             }
           }
@@ -1305,21 +1326,34 @@ export default function App({ onReady }) {
 
       if (masterUid) {
         void flushPendingPeerWrites();
+        console.info("[settle-clear] slave→master remove", { txId, masterUid, slaveUid: uidRef.current });
         try {
           await updateDoc(
             doc(db, "users", masterUid, "transactions", txId),
             { [`settlements.${uidRef.current}`]: deleteField() }
           );
+          console.info("[settle-clear] slave→master remove OK");
         } catch (masterErr) {
-          console.warn("clearSettlement: master settlement removal failed, queueing for auto-retry:", masterErr);
+          console.error("[settle-clear] slave→master remove FAILED", {
+            code: masterErr?.code,
+            message: masterErr?.message,
+            masterUid,
+            txId,
+          });
           enqueuePendingPeerWrite({ op: "clear", txId, masterUid });
-          if (
+          setTimeout(() => void flushPendingPeerWrites(), 1500);
+          const permDenied =
             masterErr?.code === "permission-denied" ||
-            String(masterErr?.message || "").includes("insufficient permissions")
-          ) {
+            String(masterErr?.message || "").includes("insufficient permissions");
+          if (permDenied) {
             dlg.toast(
-              "Cleared on your side. We'll sync the removal to the payer automatically in the background.",
-              { type: "warn", duration: 6000, title: "Syncing in background" }
+              "Firestore rules reject cross-user writes. Deploy rules so the payer sees this cleared.",
+              { type: "error", duration: 8000, title: "Payer sync blocked by rules" }
+            );
+          } else {
+            dlg.toast(
+              `Cleared locally. Auto-retrying sync to the payer… (${masterErr?.code || "network"})`,
+              { type: "warn", duration: 5000, title: "Syncing in background" }
             );
           }
         }

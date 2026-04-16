@@ -143,7 +143,12 @@ export async function upsertSplitMirrors(db, ownerUid, tx) {
   for (const peerUid of peers) {
     result.attempted += 1;
     try {
-      await setDoc(doc(db, "users", peerUid, "transactions", tx.id), payload);
+      /* merge:true is critical — without it, every master edit completely
+       * overwrites the peer's mirror doc and wipes their `settlement` field,
+       * silently un-settling bills on the slave side. With merge:true the
+       * master's edits land on top of any existing settlement / local
+       * metadata the slave has attached. */
+      await setDoc(doc(db, "users", peerUid, "transactions", tx.id), payload, { merge: true });
       result.succeeded += 1;
       result.peerUids.push(peerUid);
     } catch (e) {

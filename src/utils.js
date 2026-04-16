@@ -50,4 +50,10 @@ export const filterTx = (txs, f, cs, ce) => {
     return true;
   });
 };
-export const tot = (txs) => txs.reduce((s, t) => s + t.amount, 0);
+/** Sum expense amounts; coerces Firestore/string values so totals never break from type drift. */
+export const tot = (txs) =>
+  txs.reduce((s, t) => {
+    const raw = t?.amount;
+    const a = typeof raw === "number" && Number.isFinite(raw) ? raw : parseFloat(String(raw ?? ""));
+    return s + (Number.isFinite(a) ? a : 0);
+  }, 0);

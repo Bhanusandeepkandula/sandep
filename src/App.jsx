@@ -741,6 +741,25 @@ export default function App() {
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
   const weekTotal = useMemo(() => tot(weekTxs), [weekTxs]);
 
+  /** Human label for the calendar month used by "This Month" (same rule as `filterTx(..., "month")`). */
+  const calendarMonthLabel = useMemo(() => {
+    const loc = (locale && String(locale).trim()) || undefined;
+    return new Date().toLocaleDateString(loc, { month: "long", year: "numeric" });
+  }, [locale]);
+
+  /** Expenses whose `date` is not in the current calendar month (common after CSV import from bank screenshots). */
+  const expenseCountOutsideThisCalendarMonth = useMemo(() => {
+    const now = new Date();
+    let n = 0;
+    for (const t of txs) {
+      if (!t?.date || typeof t.date !== "string") continue;
+      const d = new Date(`${t.date}T12:00:00`);
+      if (Number.isNaN(d.getTime())) continue;
+      if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) n += 1;
+    }
+    return n;
+  }, [txs]);
+
   /** Overall monthly cap ring: remaining arc shrinks as `monthTotal` grows. */
   const monthBudgetRing = useMemo(() => {
     const cap = typeof monthlyBudgetTotal === "number" && monthlyBudgetTotal > 0 ? monthlyBudgetTotal : null;
@@ -1975,6 +1994,9 @@ export default function App() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: T.sub, marginBottom: 3 }}>This Month</div>
                   <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: "-1.5px", lineHeight: 1.1 }}>{formatMoney(monthTotal)}</div>
+                  <div style={{ fontSize: 11, color: T.mut, marginTop: 4, lineHeight: 1.35 }}>
+                    Only spending dated in {calendarMonthLabel}. Imports keep the date from the bank or receipt.
+                  </div>
                 </div>
                 {monthBudgetRing ? (
                   <button
@@ -2044,6 +2066,46 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {expenseCountOutsideThisCalendarMonth > 0 && monthTotal === 0 && txs.length > 0 ? (
+              <div
+                style={{
+                  margin: `0 ${px}px 12px`,
+                  padding: "10px 14px",
+                  borderRadius: T.r,
+                  border: `1px solid ${T.bdr}`,
+                  background: T.card2,
+                  fontSize: 12,
+                  color: T.sub,
+                  lineHeight: 1.45,
+                }}
+              >
+                <span style={{ fontWeight: 700, color: T.txt }}>{expenseCountOutsideThisCalendarMonth}</span>{" "}
+                {expenseCountOutsideThisCalendarMonth === 1 ? "expense is" : "expenses are"} dated outside {calendarMonthLabel}, so
+                this month’s total stays at {formatMoney(0)}. They still appear in{" "}
+                <strong style={{ color: T.txt }}>Recent</strong> below. Open one to change the date, or go to{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab("analytics");
+                    setDf("custom");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: T.acc,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    font: "inherit",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Analytics → Custom
+                </button>{" "}
+                and set From / To to cover your import.
+              </div>
+            ) : null}
 
             {!loggedToday && (
               <div

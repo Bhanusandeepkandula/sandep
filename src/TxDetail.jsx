@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Trash2, Users, Pencil, Check, ImageIcon, ShoppingBag, CheckCircle2 } from "lucide-react";
+import { X, Trash2, Users, Pencil, Check, ImageIcon, ShoppingBag, CheckCircle2, Wallet, BadgeCheck } from "lucide-react";
 import { useDialog } from "./AppDialogs.jsx";
 import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
@@ -15,6 +15,7 @@ export function TxDetail({
   onClose,
   onDelete,
   onEdit,
+  onSettle,
   splitContacts = [],
   onSaveSplit,
   selfProfileUuid = "",
@@ -29,9 +30,17 @@ export function TxDetail({
   const [splitPpl, setSplitPpl] = useState([]);
   const [splitSaved, setSplitSaved] = useState(false);
   const splitTimerRef = useRef(null);
+
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleAmt, setSettleAmt] = useState("");
+  const [settleMethod, setSettleMethod] = useState("");
+
   const dlg = useDialog();
 
-  useEffect(() => { setEditing(false); setEditDraft(null); setSplitEditing(false); }, [tx?.id]);
+  useEffect(() => {
+    setEditing(false); setEditDraft(null); setSplitEditing(false);
+    setSettleOpen(false); setSettleAmt(""); setSettleMethod("");
+  }, [tx?.id]);
 
   function startEdit() {
     setEditDraft({
@@ -80,6 +89,33 @@ export function TxDetail({
     return Math.max(0, txAmt - sum);
   })();
 
+  // Slave's share amount — used for settle-up default
+  const myShare = selfEntry && typeof selfEntry.a === "number" && Number.isFinite(selfEntry.a)
+    ? selfEntry.a
+    : txAmt;
+
+  const settlement = tx.settlement || null;
+  const isSettled = Boolean(settlement);
+
+  function openSettle() {
+    setSettleAmt(String(myShare));
+    setSettleMethod(payments[0] || "");
+    setSettleOpen(true);
+  }
+
+  function handleSettle(full) {
+    const amt = full ? myShare : parseFloat(settleAmt);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      dlg.toast("Enter a valid amount", { type: "warn" }); return;
+    }
+    if (!settleMethod) {
+      dlg.toast("Pick a payment method", { type: "warn" }); return;
+    }
+    onSettle?.(tx.id, { amount: amt, method: settleMethod, settledAt: new Date().toISOString(), full: amt >= myShare - 0.01 });
+    setSettleOpen(false);
+    dlg.toast(amt >= myShare - 0.01 ? "Fully settled!" : `Partial settlement of ${formatMoney(amt)} recorded`, { type: "success", duration: 3000 });
+  }
+
   function openSplitEditor() {
     if (hasSavedSplit) {
       setSplitPpl(tx.split.people.map((p) => {
@@ -109,6 +145,20 @@ export function TxDetail({
       return nl;
     });
   }
+
+  /** Master removes one person from the split and redistributes equally among the rest + owner. */
+  function removeSplitPerson(name) {
+    setSplitPpl((prev) => {
+      const nl = prev.filter((p) => p.n !== name);
+      if (splitType === "equal" && txAmt > 0 && nl.length > 0) {
+        const each = Math.round((txAmt / (nl.length + 1)) * 100) / 100;
+        return nl.map((p) => ({ ...p, a: each }));
+      }
+      return nl;
+    });
+    dlg.toast(`${name} removed from split. Amounts adjusted.`, { type: "info", duration: 2500 });
+  }
+
   function applyEqual(list) {
     if (!list.length || txAmt <= 0) return list;
     const each = Math.round((txAmt / (list.length + 1)) * 100) / 100;
@@ -318,7 +368,25 @@ export function TxDetail({
                       {otherPeople.map((p, i) => (
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.sub} /> {p.n}</span>
-                          <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(p.a)}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(p.a)}</span>
+                            {canEditSplit && (
+                              <button type="button"
+                                onClick={() => {
+                                  const remaining = peopleSafe.filter((x) => x.n !== p.n);
+                                  const type = tx.split?.type || "equal";
+                                  const adjusted = type === "equal" && txAmt > 0 && remaining.length > 0
+                                    ? remaining.map((x) => ({ ...x, a: Math.round((txAmt / (remaining.length + 1)) * 100) / 100 }))
+                                    : remaining;
+                                  onSaveSplit?.(tx.id, adjusted.length ? { type, people: adjusted } : null);
+                                  dlg.toast(`${p.n} removed. Amounts adjusted.`, { type: "info", duration: 2500 });
+                                }}
+                                title={`Remove ${p.n} from split`}
+                                style={{ background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, borderRadius: 6, padding: "2px 6px", cursor: "pointer", fontSize: 11, fontWeight: 600, lineHeight: 1 }}>
+                                ✕
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -473,17 +541,100 @@ export function TxDetail({
               </div>
             )}
 
-            {/* Delete / dismiss */}
+            {/* Settle Up (mirrors only) */}
+            {isMirror && (
+              <div style={{ padding: "0 16px 8px" }}>
+                {isSettled && !settleOpen ? (
+                  <div style={{ background: `${T.grn || "#22c55e"}10`, border: `1px solid ${T.grn || "#22c55e"}44`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <BadgeCheck size={18} color={T.grn || "#22c55e"} />
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: T.grn || "#22c55e" }}>
+                            {settlement.full ? "Fully Settled" : "Partially Settled"}
+                          </div>
+                          <div style={{ fontSize: 11, color: T.sub }}>
+                            {formatMoney(settlement.amount)} · {settlement.method} · {fDate(settlement.settledAt?.slice?.(0,10) || settlement.settledAt, dateLocale)}
+                          </div>
+                        </div>
+                      </div>
+                      <button type="button" onClick={openSettle}
+                        style={{ background: "none", border: `1px solid ${T.bdr}`, color: T.sub, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 8 }}>
+                        Update
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {settleOpen ? (
+                  <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>Settle Up</div>
+                      <button type="button" onClick={() => setSettleOpen(false)}
+                        style={{ background: T.card2, border: "none", color: T.sub, cursor: "pointer", padding: 5, borderRadius: 8 }}>
+                        <X size={15} />
+                      </button>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 10 }}>
+                      Your share: <strong style={{ color: T.txt }}>{formatMoney(myShare)}</strong>
+                    </div>
+
+                    {/* Full / Custom toggle */}
+                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                      <button type="button"
+                        onClick={() => setSettleAmt(String(myShare))}
+                        style={{ flex: 1, padding: "9px 0", borderRadius: 10, border: parseFloat(settleAmt) >= myShare - 0.01 ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: parseFloat(settleAmt) >= myShare - 0.01 ? T.adim : "transparent", color: parseFloat(settleAmt) >= myShare - 0.01 ? T.acc : T.sub, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        Full {formatMoney(myShare)}
+                      </button>
+                      <button type="button"
+                        onClick={() => setSettleAmt("")}
+                        style={{ flex: 1, padding: "9px 0", borderRadius: 10, border: settleAmt !== "" && parseFloat(settleAmt) < myShare - 0.01 ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: settleAmt !== "" && parseFloat(settleAmt) < myShare - 0.01 ? T.adim : "transparent", color: settleAmt !== "" && parseFloat(settleAmt) < myShare - 0.01 ? T.acc : T.sub, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        Custom amount
+                      </button>
+                    </div>
+
+                    <input
+                      type="number" inputMode="decimal" placeholder={`Amount (max ${formatMoney(myShare)})`}
+                      value={settleAmt}
+                      onChange={(e) => setSettleAmt(e.target.value)}
+                      style={{ ...inp, padding: "10px 12px", marginBottom: 10, fontSize: 15 }}
+                    />
+
+                    {/* Payment method */}
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Payment method</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                      {payments.map((p) => (
+                        <button key={p} type="button" onClick={() => setSettleMethod(p)}
+                          style={{ padding: "6px 12px", borderRadius: 10, border: settleMethod === p ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`, background: settleMethod === p ? T.adim : "transparent", color: settleMethod === p ? T.acc : T.sub, fontSize: 12, fontWeight: settleMethod === p ? 700 : 400, cursor: "pointer" }}>
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button type="button" onClick={() => handleSettle(false)}
+                      disabled={!settleAmt || !settleMethod}
+                      style={{ width: "100%", padding: 13, borderRadius: 12, border: "none", background: !settleAmt || !settleMethod ? T.mut : T.acc, color: !settleAmt || !settleMethod ? T.sub : T.btnTxt, fontSize: 14, fontWeight: 800, cursor: !settleAmt || !settleMethod ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                      <Check size={15} /> Confirm Settlement
+                    </button>
+                  </div>
+                ) : !isSettled ? (
+                  <button type="button" onClick={openSettle}
+                    style={{ width: "100%", padding: 13, borderRadius: 12, border: `1px solid ${T.acc}44`, background: T.adim, color: T.acc, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 10 }}>
+                    <Wallet size={15} /> Settle Up
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            {/* Delete — owner only */}
             <div style={{ padding: "6px 16px 36px" }}>
-              {isMirror ? (
-                <div style={{ fontSize: 11, color: T.sub, marginBottom: 8, lineHeight: 1.5, textAlign: "center" }}>
-                  This bill was shared with you. Removing it only hides it from your list.
-                </div>
-              ) : null}
-              <button type="button" onClick={handleDelete}
-                style={{ width: "100%", padding: 12, borderRadius: 12, background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <Trash2 size={15} /> {isMirror ? "Remove from my list" : "Delete Transaction"}
-              </button>
+              {!isMirror && (
+                <button type="button" onClick={handleDelete}
+                  style={{ width: "100%", padding: 12, borderRadius: 12, background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <Trash2 size={15} /> Delete Transaction
+                </button>
+              )}
             </div>
           </>
         )}

@@ -892,6 +892,25 @@ export default function App({ onReady }) {
     setShowSplitScan(false);
   }
 
+  /** Slave records a settlement against their mirror copy. */
+  async function saveSettlement(txId, settlement) {
+    if (!txId || !settlement) return;
+    setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, settlement } : t)));
+    setSelectedTx((st) => (st && st.id === txId ? { ...st, settlement } : st));
+    if (uidRef.current) {
+      try {
+        await setDoc(
+          doc(db, "users", uidRef.current, "transactions", txId),
+          sanitizeForFirestore({ settlement }),
+          { merge: true }
+        );
+      } catch (e) {
+        console.error("saveSettlement failed:", e);
+        dlg.toast("Could not save settlement. Try again.", { type: "error" });
+      }
+    }
+  }
+
   async function editTransaction(txId, updates) {
     if (!txId || !updates || typeof updates !== "object") return;
     const prevTx = txs.find((t) => t.id === txId);
@@ -5624,6 +5643,7 @@ export default function App({ onReady }) {
         selfName={profileName || ""}
         onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
         onEdit={(txId, updates) => void editTransaction(txId, updates)}
+        onSettle={(txId, settlement) => void saveSettlement(txId, settlement)}
         onClose={() => setSelectedTx(null)}
         onDelete={(id) => {
           delTx(id);

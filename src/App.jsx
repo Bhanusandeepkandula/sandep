@@ -1274,6 +1274,10 @@ export default function App() {
                 "Medical: pharmacy, CVS, Walgreens, doctor, hospital.\n" +
                 "Transfer: Zelle sent, Venmo sent, PayPal sent, bank transfer, credit card payment (DISCOVER, CAPITAL ONE payment).\n" +
                 "INCOME (SKIP as expense): salary, deposit, interest, refund, Zelle received, incoming transfer, green + amounts.\n\n" +
+                "PAYMENT METHOD DETECTION for payment_hint:\n" +
+                "- Receipt shows Visa/MC/Amex/Discover or card ending → use that card type.\n" +
+                "- 'Cash', 'Cash Tendered' → Cash. 'Debit'/'POS' → Debit Card. 'Apple Pay'/'Google Pay' → mobile payment.\n" +
+                "- Bank statement: if you can't tell credit vs debit from the screen, set payment_hint to null (app will ask user).\n\n" +
                 "For transaction_list: output EVERY visible expense row in \"transactions\"; never stop at the first row. " +
                 "Read the transaction amount column, NOT the running balance column. " +
                 'Mark is_credit_or_income: true for deposits, incoming transfers, green + amounts, salary — do not list those as expenses.\n\n' +

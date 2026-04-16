@@ -121,7 +121,46 @@ ENTERTAINMENT:
 
 TRAVEL:
 - Airlines, hotels, Airbnb, booking.com, Expedia, luggage, car rental, Hertz, Enterprise, toll roads
-=== End merchant intelligence ===`;
+=== End merchant intelligence ===
+
+=== PAYMENT METHOD INTELLIGENCE (use to pick the best payment) ===
+Detect the payment method from clues in the receipt, OCR text, or screenshot:
+
+CREDIT CARD indicators:
+- "Visa", "Mastercard", "MC", "Amex", "American Express", "Discover" on the receipt
+- Card number ending (e.g. "****1234", "x1234", "ending in 1234")
+- "Credit", "CR", "credit card" in the payment line
+- Online purchases (Amazon, subscriptions) are almost always credit card
+- "Purchase" label in a bank app usually means card swipe
+
+DEBIT CARD indicators:
+- "Debit", "DB", "debit card", "check card" on receipt or bank statement
+- "POS" (Point of Sale) prefix in bank transaction description
+- Bank app showing from a checking account
+- Grocery/gas station transactions often use debit
+
+CASH indicators:
+- "Cash", "CASH TENDERED", "Change due", "CASH PAYMENT" on receipt
+- Exact round amounts with no card number shown
+
+DIGITAL / MOBILE PAYMENT indicators:
+- "Apple Pay", "Google Pay", "Samsung Pay", "Tap to Pay", "Contactless"
+- "PayPal", "Venmo", "Cash App", "Zelle" — use the exact name
+- UPI, GPay, PhonePe (India)
+
+BANK TRANSFER indicators:
+- "ACH", "Wire", "EFT", "Direct Debit", "Auto-pay", "Bank Transfer"
+- Utility bills, rent, mortgage often use bank transfer or auto-pay
+
+CHECK indicators:
+- "Check #", "Cheque", check number visible
+
+RULES:
+- Match the detected payment type to the CLOSEST entry in the user's Payments list (exact spelling).
+- If the receipt shows a card ending (e.g. "Visa ****4521"), and the user has "Visa" or "Credit Card" in their list, pick that.
+- If the source is a BANK STATEMENT (not a receipt) and you cannot tell if it's credit or debit from the text, add a follow_up_question: "Is this account a credit card or debit/checking account?" (JSON mode only).
+- If no payment clue exists at all, use the first payment in the user's list as default.
+=== End payment intelligence ===`;
 
 const SYSTEM_PROMPT_CSV_PLAIN = `You are an expert expense data extractor with merchant intelligence. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
 
@@ -136,7 +175,7 @@ Column rules (data rows only, after the header):
 - date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message for the year. If ambiguous (e.g. "12/05"), treat as DD/MM. If OCR shows only MONTH+YEAR (no day), use day 01.
 - amount: positive number only, no currency symbols or commas in the number. Read the EXACT amount from the text — never round or guess.
 - category: Use the MERCHANT CATEGORY INTELLIGENCE above to understand the transaction, then pick the CLOSEST match from the user's Categories list. MUST be copied EXACTLY (same spelling, same case). If nothing fits, use the very first category in the list.
-- payment: Identify from context (Card, Cash, Zelle, Venmo, bank name). MUST be copied EXACTLY from the Payments list. If nothing fits, use the very first payment in the list.
+- payment: Use PAYMENT METHOD INTELLIGENCE to detect the payment method from receipt clues (card type, "Cash", "Debit", card ending, POS, etc.), then pick the CLOSEST match from the user's Payments list. MUST be copied EXACTLY. If nothing fits, use the first payment in the list.
 - notes: merchant/restaurant CLEAN name (remove "SQ *", "TST*", store numbers, "#1234"). Max 60 chars.
 - tags: optional; leave the field empty if none (trailing comma is fine).
 
@@ -178,7 +217,7 @@ FIELD RULES:
 - date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message — never guess a different year. If OCR shows only MONTH+YEAR (no day), use day 01. If the bill date is completely missing, use follow_up_questions to ask the user.
 - amount: positive number only, no currency symbols. Read the EXACT number from the text. For receipts, use GRAND TOTAL (includes tax+tip). NEVER guess a total you cannot support from the text; if no plausible total exists, output csv_lines with HEADER ONLY and ask in follow_up_questions.
 - category: Use MERCHANT CATEGORY INTELLIGENCE to understand the transaction, then pick the CLOSEST match from the user's category list. MUST match EXACTLY (same spelling and case).
-- payment: Identify from context (card type, bank name, Zelle, Venmo, Cash). MUST match the user's payment list EXACTLY.
+- payment: Use PAYMENT METHOD INTELLIGENCE to detect payment from receipt/statement clues (card brand, "Cash", "Debit", "POS", card ending). MUST match the user's payment list EXACTLY. If source is a bank statement and credit vs debit is unclear, ask in follow_up_questions.
 - notes: CLEAN merchant name (no store numbers, no "SQ*", no "#1234"). Max 60 chars.
 - tags: optional; leave empty if none.
 
@@ -588,7 +627,7 @@ CSV FIELD RULES:
 - date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message — never guess a different year. If the screen shows "Apr 15" with no year, use the year from MANDATORY DATE RULES.
 - amount: positive number, EXACT as shown on screen. No currency symbols, no commas. For receipts: use GRAND TOTAL (includes tax+tip). For bank lists: use the transaction amount (NOT the running balance column).
 - category: Use MERCHANT CATEGORY INTELLIGENCE to understand the merchant/transaction, then pick the CLOSEST match from the user's Categories list. Copy EXACTLY (same spelling, same case).
-- payment: Identify from context (card brand, bank app, Zelle, Venmo, Cash). Copy EXACTLY from user's Payments list.
+- payment: Use PAYMENT METHOD INTELLIGENCE to detect from visual clues (card logo, "Visa ****1234", "Cash", "Debit", bank app name). Copy EXACTLY from user's Payments list. If bank statement and credit vs debit is unclear, ask in follow_up_questions.
 - notes: CLEAN merchant name — remove "SQ *", "TST*", store numbers, "#1234", "Purchase", "Transfer" prefixes. Just the merchant name. Max 60 chars.
 - tags: optional; leave empty.
 

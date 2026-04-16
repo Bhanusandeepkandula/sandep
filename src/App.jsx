@@ -43,6 +43,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import ReactCountryFlag from "react-country-flag";
 import { T, card, card2, inp, lbl, pill, THEMES, applyTheme } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
@@ -110,48 +111,89 @@ import {
 const MONTH_TOTAL_BUDGET_KEY = "__month_total__";
 
 const CURRENCIES = [
-  { code: "INR", locale: "en-IN", symbol: "₹", name: "Indian Rupee", flag: "🇮🇳" },
-  { code: "USD", locale: "en-US", symbol: "$", name: "US Dollar", flag: "🇺🇸" },
-  { code: "EUR", locale: "de-DE", symbol: "€", name: "Euro", flag: "🇪🇺" },
-  { code: "GBP", locale: "en-GB", symbol: "£", name: "British Pound", flag: "🇬🇧" },
-  { code: "JPY", locale: "ja-JP", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵" },
-  { code: "CNY", locale: "zh-CN", symbol: "¥", name: "Chinese Yuan", flag: "🇨🇳" },
-  { code: "AUD", locale: "en-AU", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺" },
-  { code: "CAD", locale: "en-CA", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦" },
-  { code: "CHF", locale: "de-CH", symbol: "CHF", name: "Swiss Franc", flag: "🇨🇭" },
-  { code: "SGD", locale: "en-SG", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬" },
-  { code: "HKD", locale: "zh-HK", symbol: "HK$", name: "Hong Kong Dollar", flag: "🇭🇰" },
-  { code: "KRW", locale: "ko-KR", symbol: "₩", name: "South Korean Won", flag: "🇰🇷" },
-  { code: "MXN", locale: "es-MX", symbol: "MX$", name: "Mexican Peso", flag: "🇲🇽" },
-  { code: "BRL", locale: "pt-BR", symbol: "R$", name: "Brazilian Real", flag: "🇧🇷" },
-  { code: "ZAR", locale: "en-ZA", symbol: "R", name: "South African Rand", flag: "🇿🇦" },
-  { code: "AED", locale: "ar-AE", symbol: "د.إ", name: "UAE Dirham", flag: "🇦🇪" },
-  { code: "SAR", locale: "ar-SA", symbol: "﷼", name: "Saudi Riyal", flag: "🇸🇦" },
-  { code: "THB", locale: "th-TH", symbol: "฿", name: "Thai Baht", flag: "🇹🇭" },
-  { code: "IDR", locale: "id-ID", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩" },
-  { code: "MYR", locale: "ms-MY", symbol: "RM", name: "Malaysian Ringgit", flag: "🇲🇾" },
-  { code: "PHP", locale: "en-PH", symbol: "₱", name: "Philippine Peso", flag: "🇵🇭" },
-  { code: "VND", locale: "vi-VN", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳" },
-  { code: "TWD", locale: "zh-TW", symbol: "NT$", name: "New Taiwan Dollar", flag: "🇹🇼" },
-  { code: "TRY", locale: "tr-TR", symbol: "₺", name: "Turkish Lira", flag: "🇹🇷" },
-  { code: "RUB", locale: "ru-RU", symbol: "₽", name: "Russian Ruble", flag: "🇷🇺" },
-  { code: "PLN", locale: "pl-PL", symbol: "zł", name: "Polish Zloty", flag: "🇵🇱" },
-  { code: "SEK", locale: "sv-SE", symbol: "kr", name: "Swedish Krona", flag: "🇸🇪" },
-  { code: "NOK", locale: "nb-NO", symbol: "kr", name: "Norwegian Krone", flag: "🇳🇴" },
-  { code: "DKK", locale: "da-DK", symbol: "kr", name: "Danish Krone", flag: "🇩🇰" },
-  { code: "NZD", locale: "en-NZ", symbol: "NZ$", name: "New Zealand Dollar", flag: "🇳🇿" },
-  { code: "EGP", locale: "ar-EG", symbol: "E£", name: "Egyptian Pound", flag: "🇪🇬" },
-  { code: "NGN", locale: "en-NG", symbol: "₦", name: "Nigerian Naira", flag: "🇳🇬" },
-  { code: "KES", locale: "en-KE", symbol: "KSh", name: "Kenyan Shilling", flag: "🇰🇪" },
-  { code: "PKR", locale: "ur-PK", symbol: "₨", name: "Pakistani Rupee", flag: "🇵🇰" },
-  { code: "BDT", locale: "bn-BD", symbol: "৳", name: "Bangladeshi Taka", flag: "🇧🇩" },
-  { code: "LKR", locale: "si-LK", symbol: "Rs", name: "Sri Lankan Rupee", flag: "🇱🇰" },
-  { code: "NPR", locale: "ne-NP", symbol: "Rs", name: "Nepalese Rupee", flag: "🇳🇵" },
-  { code: "CLP", locale: "es-CL", symbol: "CL$", name: "Chilean Peso", flag: "🇨🇱" },
-  { code: "COP", locale: "es-CO", symbol: "COL$", name: "Colombian Peso", flag: "🇨🇴" },
-  { code: "ARS", locale: "es-AR", symbol: "AR$", name: "Argentine Peso", flag: "🇦🇷" },
-  { code: "PEN", locale: "es-PE", symbol: "S/", name: "Peruvian Sol", flag: "🇵🇪" },
+  { code: "INR", country: "IN", locale: "en-IN", symbol: "₹", name: "Indian Rupee" },
+  { code: "USD", country: "US", locale: "en-US", symbol: "$", name: "US Dollar" },
+  { code: "EUR", country: "EU", locale: "de-DE", symbol: "€", name: "Euro" },
+  { code: "GBP", country: "GB", locale: "en-GB", symbol: "£", name: "British Pound" },
+  { code: "JPY", country: "JP", locale: "ja-JP", symbol: "¥", name: "Japanese Yen" },
+  { code: "CNY", country: "CN", locale: "zh-CN", symbol: "¥", name: "Chinese Yuan" },
+  { code: "AUD", country: "AU", locale: "en-AU", symbol: "A$", name: "Australian Dollar" },
+  { code: "CAD", country: "CA", locale: "en-CA", symbol: "C$", name: "Canadian Dollar" },
+  { code: "CHF", country: "CH", locale: "de-CH", symbol: "CHF", name: "Swiss Franc" },
+  { code: "SGD", country: "SG", locale: "en-SG", symbol: "S$", name: "Singapore Dollar" },
+  { code: "HKD", country: "HK", locale: "zh-HK", symbol: "HK$", name: "Hong Kong Dollar" },
+  { code: "KRW", country: "KR", locale: "ko-KR", symbol: "₩", name: "South Korean Won" },
+  { code: "MXN", country: "MX", locale: "es-MX", symbol: "MX$", name: "Mexican Peso" },
+  { code: "BRL", country: "BR", locale: "pt-BR", symbol: "R$", name: "Brazilian Real" },
+  { code: "ZAR", country: "ZA", locale: "en-ZA", symbol: "R", name: "South African Rand" },
+  { code: "AED", country: "AE", locale: "ar-AE", symbol: "د.إ", name: "UAE Dirham" },
+  { code: "SAR", country: "SA", locale: "ar-SA", symbol: "﷼", name: "Saudi Riyal" },
+  { code: "THB", country: "TH", locale: "th-TH", symbol: "฿", name: "Thai Baht" },
+  { code: "IDR", country: "ID", locale: "id-ID", symbol: "Rp", name: "Indonesian Rupiah" },
+  { code: "MYR", country: "MY", locale: "ms-MY", symbol: "RM", name: "Malaysian Ringgit" },
+  { code: "PHP", country: "PH", locale: "en-PH", symbol: "₱", name: "Philippine Peso" },
+  { code: "VND", country: "VN", locale: "vi-VN", symbol: "₫", name: "Vietnamese Dong" },
+  { code: "TWD", country: "TW", locale: "zh-TW", symbol: "NT$", name: "New Taiwan Dollar" },
+  { code: "TRY", country: "TR", locale: "tr-TR", symbol: "₺", name: "Turkish Lira" },
+  { code: "RUB", country: "RU", locale: "ru-RU", symbol: "₽", name: "Russian Ruble" },
+  { code: "PLN", country: "PL", locale: "pl-PL", symbol: "zł", name: "Polish Zloty" },
+  { code: "SEK", country: "SE", locale: "sv-SE", symbol: "kr", name: "Swedish Krona" },
+  { code: "NOK", country: "NO", locale: "nb-NO", symbol: "kr", name: "Norwegian Krone" },
+  { code: "DKK", country: "DK", locale: "da-DK", symbol: "kr", name: "Danish Krone" },
+  { code: "NZD", country: "NZ", locale: "en-NZ", symbol: "NZ$", name: "New Zealand Dollar" },
+  { code: "EGP", country: "EG", locale: "ar-EG", symbol: "E£", name: "Egyptian Pound" },
+  { code: "NGN", country: "NG", locale: "en-NG", symbol: "₦", name: "Nigerian Naira" },
+  { code: "KES", country: "KE", locale: "en-KE", symbol: "KSh", name: "Kenyan Shilling" },
+  { code: "PKR", country: "PK", locale: "ur-PK", symbol: "₨", name: "Pakistani Rupee" },
+  { code: "BDT", country: "BD", locale: "bn-BD", symbol: "৳", name: "Bangladeshi Taka" },
+  { code: "LKR", country: "LK", locale: "si-LK", symbol: "Rs", name: "Sri Lankan Rupee" },
+  { code: "NPR", country: "NP", locale: "ne-NP", symbol: "Rs", name: "Nepalese Rupee" },
+  { code: "CLP", country: "CL", locale: "es-CL", symbol: "CL$", name: "Chilean Peso" },
+  { code: "COP", country: "CO", locale: "es-CO", symbol: "COL$", name: "Colombian Peso" },
+  { code: "ARS", country: "AR", locale: "es-AR", symbol: "AR$", name: "Argentine Peso" },
+  { code: "PEN", country: "PE", locale: "es-PE", symbol: "S/", name: "Peruvian Sol" },
 ];
+
+/**
+ * SVG flag for a currency (Twemoji via react-country-flag).
+ * Falls back to currency code when the country is unknown (e.g. EUR/EU).
+ */
+function CurrencyFlag({ country, code, size = 20, round = false }) {
+  const cc = (country || "").toUpperCase();
+  if (!cc || cc === "EU") {
+    return (
+      <span
+        aria-hidden="true"
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: size * 1.35, height: size,
+          borderRadius: round ? "50%" : 4,
+          background: "linear-gradient(135deg,#003399,#ffcc00)",
+          color: "#fff", fontSize: Math.round(size * 0.52), fontWeight: 800,
+          letterSpacing: 0.4, flexShrink: 0,
+        }}
+      >
+        {code || "€"}
+      </span>
+    );
+  }
+  return (
+    <ReactCountryFlag
+      countryCode={cc}
+      svg
+      aria-label={cc}
+      style={{
+        width: size * 1.35,
+        height: size,
+        borderRadius: round ? "50%" : 3,
+        objectFit: "cover",
+        flexShrink: 0,
+        boxShadow: "0 0 0 1px rgba(0,0,0,0.08) inset",
+      }}
+      title={cc}
+    />
+  );
+}
 
 /**
  * Collapsible copy-paste prompt for vision LLMs (ChatGPT, Claude, Gemini, etc.) → expense CSV.
@@ -4570,7 +4612,17 @@ export default function App({ onReady }) {
                 const activeCur = CURRENCIES.find((c) => c.code === currencyCode) || CURRENCIES[0];
                 const freqLabel = { daily: "Daily", weekly: "Weekly (Mon)", monthly: "Monthly (1st)" }[reportFreq] || "Weekly";
                 const rows = [
-                  { Icon: RefreshCw, label: "Currency", sub: `${activeCur.flag} ${activeCur.code} ${activeCur.symbol}`, color: T.acc, onClick: () => setShowCurrencyPicker(true), right: null },
+                  {
+                    Icon: RefreshCw, label: "Currency", sub: `${activeCur.name} · ${activeCur.symbol}`,
+                    color: T.acc, onClick: () => setShowCurrencyPicker(true),
+                    right: (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <CurrencyFlag country={activeCur.country} code={activeCur.code} size={18} />
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.sub }}>{activeCur.code}</span>
+                        <ChevronRight size={16} color={T.mut} />
+                      </div>
+                    ),
+                  },
                   {
                     Icon: FileText, label: "Report Frequency", sub: `Auto-generate: ${freqLabel}`, color: T.purp, onClick: null,
                     right: (
@@ -5050,7 +5102,7 @@ export default function App({ onReady }) {
                       textAlign: "left",
                     }}
                   >
-                    <span style={{ fontSize: 24, lineHeight: 1 }}>{cur.flag}</span>
+                    <CurrencyFlag country={cur.country} code={cur.code} size={22} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: active ? 700 : 500 }}>{cur.name}</div>
                       <div style={{ fontSize: 12, color: T.sub }}>{cur.code}</div>

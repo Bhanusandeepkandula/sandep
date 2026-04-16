@@ -87,12 +87,56 @@ export function matchCatalogName(raw, names) {
  * }} importRow
  */
 
+/**
+ * When the model omits the header row, Papa treats the first data line as column names and returns zero rows.
+ * If the first line looks like values (ISO date + amount, or amount + ISO date), prepend a matching header.
+ * @param {string} csvText
+ */
+export function ensureExpenseCsvHeaderRow(csvText) {
+  const trimmed = csvText.trim();
+  if (!trimmed) return csvText;
+
+  const lines = trimmed.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) return csvText;
+
+  const firstLine = lines[0];
+  const parsedOne = Papa.parse(firstLine, { header: false });
+  const row = parsedOne.data?.[0];
+  if (!Array.isArray(row) || row.length < 2) return csvText;
+
+  const c0 = String(row[0] ?? "").trim();
+  const c1 = String(row[1] ?? "").trim();
+  const l0 = c0.toLowerCase();
+  const l1 = c1.toLowerCase();
+
+  // First line already looks like a header row
+  if (
+    ["amount", "date", "category", "amt", "payment", "notes", "tags"].some((h) => l0 === h || l1 === h)
+  ) {
+    return csvText;
+  }
+
+  const c0Date = /^\d{4}-\d{2}-\d{2}$/.test(c0);
+  const c1Date = /^\d{4}-\d{2}-\d{2}$/.test(c1);
+  const c0Amt = Number.isFinite(parseAmount(c0)) && parseAmount(c0) > 0;
+  const c1Amt = Number.isFinite(parseAmount(c1)) && parseAmount(c1) > 0;
+
+  if (c0Date && c1Amt) {
+    return `date,amount,category,payment,notes,tags\n${trimmed}`;
+  }
+  if (c0Amt && c1Date) {
+    return `amount,date,category,payment,notes,tags\n${trimmed}`;
+  }
+
+  return csvText;
+}
+
 /** @param {string} csvText @param {{ categories: string[]; payments: string[] }} catalogLists */
 export function parseExpenseCsv(csvText, catalogLists) {
   const { categories, payments } = catalogLists;
   const defaultPay = payments[0] || "";
 
-  const parsed = Papa.parse(csvText, {
+  const parsed = Papa.parse(ensureExpenseCsvHeaderRow(csvText), {
     header: true,
     skipEmptyLines: "greedy",
     transformHeader: (h) => normKey(h),

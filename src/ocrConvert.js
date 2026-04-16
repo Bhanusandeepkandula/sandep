@@ -3,30 +3,34 @@
  * Requires VITE_OPENAI_API_KEY to be set at build time.
  */
 
-import { matchCatalogName } from "./importParse.js";
+import { ensureExpenseCsvHeaderRow, matchCatalogName } from "./importParse.js";
 
 const OPENAI_KEY = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
+const HEADER_LINE = "date,amount,category,payment,notes,tags";
+
 const SYSTEM_PROMPT = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
 
-CSV format (include this exact header line):
-date,amount,category,payment,notes,tags
+CRITICAL — first line of your reply MUST be this exact header (copy it verbatim, character for character):
+${HEADER_LINE}
 
-Column rules:
+Do not put a data row on line 1. Do not skip the header. If there is one expense, output exactly two lines: the header line above, then one data line.
+
+Column rules (data rows only, after the header):
 - date: YYYY-MM-DD. If only day/month visible, use current year. If ambiguous (e.g. "12/05"), treat as DD/MM.
-- amount: positive number only, no currency symbols or commas.
+- amount: positive number only, no currency symbols or commas in the number.
 - category: MUST be copied EXACTLY (same spelling, same case) from the Categories list. Pick the closest match. If nothing fits, use the very first category in the list.
 - payment: MUST be copied EXACTLY from the Payments list. Pick the closest match. If nothing fits, use the very first payment in the list.
 - notes: merchant/restaurant name or short description (max 60 chars).
-- tags: optional comma-separated keywords (leave empty if unsure).
+- tags: optional; leave the field empty if none (trailing comma is fine).
 
 Amount rules — IMPORTANT:
-- For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual items.
-- For a bank statement or transaction list with multiple separate transactions: output one row per transaction.
+- For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE data row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual line items.
+- For a bank statement or transaction list with multiple separate transactions: output one data row per transaction.
 - Always prefer GRAND TOTAL > TOTAL > subtotal. Taxes and service charges are included in the grand total.
 
 Output rules:
-- Return ONLY the CSV text. No markdown, no explanation, no code fences.
+- Return ONLY the CSV text. No markdown, no explanation, no code fences, no leading commentary.
 - Use double-quotes around any field that contains a comma.`;
 
 /**
@@ -111,6 +115,7 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
     `Categories (use exactly as written): ${catList}`,
     `Payments (use exactly as written): ${payList}`,
     `Today's date: ${new Date().toISOString().split("T")[0]}`,
+    `First line of your CSV must be exactly: ${HEADER_LINE}`,
     ``,
     `OCR text:`,
     ocrText.trim(),
@@ -148,6 +153,7 @@ export async function convertOcrToCsv(ocrText, { categories = [], payments = [] 
   // Strip markdown code fences if model wraps output
   const csv = raw.replace(/^```(?:csv)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 
+  const withHeader = ensureExpenseCsvHeaderRow(csv);
   // Post-process: guarantee category/payment exactly match catalog entries
-  return fixCatalogColumns(csv, categories, payments);
+  return fixCatalogColumns(withHeader, categories, payments);
 }

@@ -214,7 +214,13 @@ function sanitizeForFirestore(obj) {
 }
 
 export default function App({ onReady }) {
-  const [tab, setTab] = useState("home");
+  const [tab, setTabRaw] = useState("home");
+  const setTab = useCallback((t) => {
+    setTabRaw((prev) => {
+      if (t !== prev && mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+      return t;
+    });
+  }, []);
   const [txs, setTxs] = useState([]);
   const [budgets, setBudgets] = useState({});
   const [fixedExpenses, setFixedExpenses] = useState([]);
@@ -2261,7 +2267,7 @@ export default function App({ onReady }) {
                     }}
                   >
                     <svg width={92} height={92} viewBox="0 0 100 100" style={{ transform: "rotate(-90deg)", display: "block" }} aria-hidden>
-                      <circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+                      <circle cx="50" cy="50" r="38" fill="none" stroke={T.id === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"} strokeWidth="6" />
                       <circle
                         cx="50"
                         cy="50"
@@ -5055,7 +5061,7 @@ export default function App({ onReady }) {
               fontSize: 14,
               fontWeight: 600,
               textAlign: "center",
-              boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
+              boxShadow: T.id === "light" ? "0 12px 40px rgba(0,0,0,0.15)" : "0 12px 40px rgba(0,0,0,0.45)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",

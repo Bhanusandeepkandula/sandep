@@ -17,11 +17,20 @@ export function DialogProvider({ children }) {
     const id = ++toastId.current;
     const dur = opts.duration ?? 3000;
     const type = opts.type ?? "info";
-    setToasts((p) => [...p, { id, msg, type, leaving: false }]);
+    const onClick = typeof opts.onClick === "function" ? opts.onClick : null;
+    const actionLabel = opts.actionLabel || null;
+    const title = opts.title || null;
+    setToasts((p) => [...p, { id, msg, type, leaving: false, onClick, actionLabel, title }]);
     setTimeout(() => {
       setToasts((p) => p.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
       setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 320);
     }, dur);
+    return id;
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((p) => p.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 320);
   }, []);
 
   const alert = useCallback((msg, opts = {}) => {
@@ -53,12 +62,12 @@ export function DialogProvider({ children }) {
     });
   }, []);
 
-  const ctx = { toast, alert, confirm: showConfirm };
+  const ctx = { toast, alert, confirm: showConfirm, dismissToast };
 
   return (
     <DialogCtx.Provider value={ctx}>
       {children}
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
       {confirm && <ConfirmOverlay {...confirm} />}
     </DialogCtx.Provider>
   );
@@ -77,22 +86,26 @@ const COLORS = {
   info: () => T.blue,
 };
 
-function ToastStack({ toasts }) {
+function ToastStack({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   return (
     <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 8000, display: "flex", flexDirection: "column", alignItems: "center", padding: "max(env(safe-area-inset-top, 12px), 12px) 16px 0", pointerEvents: "none" }}>
       {toasts.map((t) => {
         const Icon = ICONS[t.type] || Info;
         const color = (COLORS[t.type] || COLORS.info)();
+        const clickable = !!t.onClick;
         return (
           <div
             key={t.id}
+            onClick={clickable ? () => { try { t.onClick(); } finally { onDismiss && onDismiss(t.id); } } : undefined}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
             style={{
               pointerEvents: "auto",
               width: "100%",
               maxWidth: 400,
               marginBottom: 8,
-              padding: "12px 16px",
+              padding: "12px 14px",
               borderRadius: 14,
               background: T.card,
               border: `1px solid ${color}44`,
@@ -101,10 +114,29 @@ function ToastStack({ toasts }) {
               alignItems: "center",
               gap: 10,
               animation: t.leaving ? "toast-out .3s ease-in forwards" : "toast-in .3s ease-out",
+              cursor: clickable ? "pointer" : "default",
             }}
           >
             <Icon size={18} color={color} style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: T.txt, flex: 1, lineHeight: 1.35 }}>{t.msg}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {t.title ? (
+                <div style={{ fontSize: 13, fontWeight: 800, color: T.txt, lineHeight: 1.25 }}>{t.title}</div>
+              ) : null}
+              <div style={{ fontSize: t.title ? 12 : 13, fontWeight: t.title ? 500 : 600, color: t.title ? T.sub : T.txt, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis" }}>
+                {t.msg}
+              </div>
+            </div>
+            {t.actionLabel && clickable ? (
+              <span style={{ fontSize: 12, fontWeight: 700, color, flexShrink: 0, padding: "4px 10px", borderRadius: 8, background: `${color}18`, border: `1px solid ${color}33` }}>{t.actionLabel}</span>
+            ) : null}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDismiss && onDismiss(t.id); }}
+              aria-label="Dismiss"
+              style={{ background: "transparent", border: "none", color: T.mut, cursor: "pointer", padding: 4, display: "flex", alignItems: "center", flexShrink: 0 }}
+            >
+              <X size={14} />
+            </button>
           </div>
         );
       })}

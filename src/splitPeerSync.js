@@ -90,18 +90,30 @@ export function buildMirrorTransaction(tx, syncedFromUid) {
 }
 
 export async function upsertSplitMirrors(db, ownerUid, tx) {
-  if (!tx?.id || !tx?.split?.people?.length) return;
+  const result = { attempted: 0, succeeded: 0, failed: 0, unresolved: [], peerUids: [] };
+  if (!tx?.id || !tx?.split?.people?.length) return result;
+  const unresolvedNames = [];
+  for (const p of tx.split.people) {
+    const uuid = typeof p.u === "string" ? p.u.trim() : "";
+    if (!uuid) unresolvedNames.push(p.n || "(unnamed)");
+  }
   const peers = await collectPeerUidsForSplit(db, tx.split, ownerUid);
-  if (!peers.length) return;
+  result.unresolved = unresolvedNames;
+  if (!peers.length) return result;
   const mirror = buildMirrorTransaction(tx, ownerUid);
   const payload = sanitize(mirror);
   for (const peerUid of peers) {
+    result.attempted += 1;
     try {
       await setDoc(doc(db, "users", peerUid, "transactions", tx.id), payload);
+      result.succeeded += 1;
+      result.peerUids.push(peerUid);
     } catch (e) {
+      result.failed += 1;
       console.error("upsertSplitMirrors", peerUid, e);
     }
   }
+  return result;
 }
 
 /** Remove mirrored copies from peers’ libraries (before updating split or deleting the expense). */

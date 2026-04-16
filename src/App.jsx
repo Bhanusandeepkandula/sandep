@@ -40,6 +40,7 @@ import {
   FileText,
   Palette,
   BrainCircuit,
+  AlertTriangle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { T, card, card2, inp, lbl, pill, THEMES, applyTheme } from "./config.js";
@@ -302,6 +303,10 @@ export default function App({ onReady }) {
   const [bulkSuccess, setBulkSuccess] = useState(null);
 
   const [selectedTx, setSelectedTx] = useState(null);
+  /** Tracks which tx IDs we've already seen from Firestore (to detect newly-arrived mirrors). */
+  const seenTxIdsRef = useRef(null);
+  /** Tracks mirror tx ids we've already notified for (prevents duplicate toasts across reconnects). */
+  const notifiedMirrorIdsRef = useRef(new Set());
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -422,6 +427,10 @@ export default function App({ onReady }) {
     (n) => fmt(n, { currency: currencyCode || undefined, locale: locale || undefined }),
     [currencyCode, locale]
   );
+  const formatMoneyRef = useRef(formatMoney);
+  useEffect(() => { formatMoneyRef.current = formatMoney; }, [formatMoney]);
+  const profileTagUuidRef = useRef("");
+  useEffect(() => { profileTagUuidRef.current = profileTagUuid || ""; }, [profileTagUuid]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -446,6 +455,8 @@ export default function App({ onReady }) {
     if (!firebaseUser) {
       uidRef.current = null;
       setProfileTagUuid("");
+      seenTxIdsRef.current = null;
+      notifiedMirrorIdsRef.current = new Set();
       if (authChecked) {
         setFbStatus("auth");
         setFbErrorDetail("");
@@ -556,6 +567,44 @@ export default function App({ onReady }) {
           if (!active) return;
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           rows.sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+          const prevSeen = seenTxIdsRef.current;
+          if (prevSeen !== null) {
+            for (const tx of rows) {
+              if (prevSeen.has(tx.id)) continue;
+              if (notifiedMirrorIdsRef.current.has(tx.id)) continue;
+              const isMirror =
+                typeof tx.syncedFromUid === "string" &&
+                tx.syncedFromUid.trim() &&
+                tx.syncedFromUid !== uidRef.current;
+              if (!isMirror) continue;
+              notifiedMirrorIdsRef.current.add(tx.id);
+              const selfUuid = profileTagUuidRef.current || "";
+              const selfEntry = Array.isArray(tx?.split?.people)
+                ? tx.split.people.find((p) => p && typeof p.u === "string" && p.u === selfUuid)
+                : null;
+              const rawShare = selfEntry && typeof selfEntry.a === "number" && Number.isFinite(selfEntry.a)
+                ? selfEntry.a
+                : null;
+              const amtFmt = rawShare != null
+                ? formatMoneyRef.current(rawShare)
+                : formatMoneyRef.current(Number(tx.amount) || 0);
+              const merchant = (typeof tx.notes === "string" && tx.notes.trim()) || tx.category || "Expense";
+              dlg.toast(
+                `${merchant} · your share ${amtFmt} (bill ${formatMoneyRef.current(Number(tx.amount) || 0)})`,
+                {
+                  type: "info",
+                  title: "New split received",
+                  duration: 7000,
+                  actionLabel: "View",
+                  onClick: () => {
+                    setSelectedTx(tx);
+                    setTab("home");
+                  },
+                }
+              );
+            }
+          }
+          seenTxIdsRef.current = new Set(rows.map((r) => r.id));
           setTxs(rows);
         });
 
@@ -802,9 +851,23 @@ export default function App({ onReady }) {
       setSelectedTx((st) => (st && st.id === txId ? { ...st, split: enriched } : st));
       if (!isMirrorCopy && merged?.split?.people?.length) {
         try {
-          await upsertSplitMirrors(db, uidRef.current, merged);
+          const result = await upsertSplitMirrors(db, uidRef.current, merged);
+          if (result && (result.unresolved?.length || result.failed > 0)) {
+            const missing = (result.unresolved || []).filter(Boolean);
+            if (missing.length) {
+              dlg.toast(
+                `${missing.join(", ")} ${missing.length === 1 ? "doesn't have" : "don't have"} a linked profile — they won't see this split until they add you back.`,
+                { type: "warn", duration: 7000, title: "Split saved locally" }
+              );
+            } else if (result.failed > 0) {
+              dlg.toast(`Couldn't sync split to ${result.failed} friend${result.failed === 1 ? "" : "s"}. Check your connection.`, { type: "error", duration: 6000 });
+            }
+          } else if (result && result.succeeded > 0) {
+            dlg.toast(`Split sent to ${result.succeeded} friend${result.succeeded === 1 ? "" : "s"}`, { type: "success", duration: 3000 });
+          }
         } catch (mirrorErr) {
           console.error("Mirror sync failed (split still saved locally):", mirrorErr);
+          dlg.toast("Couldn't sync split to friends. Split saved locally.", { type: "error", duration: 5000 });
         }
       }
     } catch (e) {
@@ -1202,7 +1265,26 @@ export default function App({ onReady }) {
       }
       if (receiptUrl) newTx.receiptUrl = receiptUrl;
       await setDoc(doc(db, "users", uidRef.current, "transactions", newTx.id), sanitizeForFirestore(newTx));
-      await upsertSplitMirrors(db, uidRef.current, newTx);
+      if (newTx?.split?.people?.length) {
+        try {
+          const result = await upsertSplitMirrors(db, uidRef.current, newTx);
+          if (result && (result.unresolved?.length || result.failed > 0)) {
+            const missing = (result.unresolved || []).filter(Boolean);
+            if (missing.length) {
+              dlg.toast(
+                `${missing.join(", ")} ${missing.length === 1 ? "doesn't have" : "don't have"} a linked profile — they won't see this split until they link back via QR.`,
+                { type: "warn", duration: 7000, title: "Split saved locally" }
+              );
+            } else if (result.failed > 0) {
+              dlg.toast(`Couldn't sync split to ${result.failed} friend${result.failed === 1 ? "" : "s"}. We'll retry next time.`, { type: "error", duration: 5000 });
+            }
+          } else if (result && result.succeeded > 0) {
+            dlg.toast(`Split sent to ${result.succeeded} friend${result.succeeded === 1 ? "" : "s"}`, { type: "success", duration: 3000 });
+          }
+        } catch (mirrorErr) {
+          console.error("upsertSplitMirrors (addExpense):", mirrorErr);
+        }
+      }
     } catch (e) {
       console.error(e);
       setFErr("Could not save expense. Check your connection.");
@@ -4389,6 +4471,50 @@ export default function App({ onReady }) {
               ) : null}
             </div>
 
+            {/* ─── Display Name ─── */}
+            {firebaseUser?.email ? (
+              <div style={{ ...card, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: T.sub, marginBottom: 6, fontWeight: 600 }}>Display name</div>
+                <div style={{ fontSize: 11, color: T.mut, lineHeight: 1.45, marginBottom: 10 }}>
+                  The name friends see when you split expenses with them.
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    type="text"
+                    placeholder="e.g. Alex Johnson"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    style={{ ...inp, flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!profileName.trim()}
+                    onClick={async () => {
+                      const name = profileName.trim();
+                      if (!name) { dlg.toast("Name cannot be empty", { type: "warn" }); return; }
+                      if (!uidRef.current) return;
+                      try {
+                        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { profileName: name }, { merge: true });
+                        dlg.toast("Display name updated", { type: "success" });
+                      } catch (err) {
+                        console.error("Failed to save profile name", err);
+                        dlg.toast("Couldn't save — check your connection", { type: "error" });
+                      }
+                    }}
+                    style={{
+                      padding: "0 16px", borderRadius: 10, border: "none",
+                      background: profileName.trim() ? T.acc : T.card2,
+                      color: profileName.trim() ? T.btnTxt : T.mut,
+                      fontSize: 13, fontWeight: 700,
+                      cursor: profileName.trim() ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {/* ─── Stats Row ─── */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
               {[
@@ -4483,13 +4609,38 @@ export default function App({ onReady }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
                 {people.map((p) => {
                   const pn = normalizePerson(p);
+                  const looksLikeUuid = /^(u_[a-f0-9]{8,}|id-\d+)/i.test(pn.n);
                   return (
-                    <div key={personStableKey(pn)} style={{ display: "flex", alignItems: "center", gap: 5, background: T.card2, borderRadius: 999, padding: "5px 10px", border: `1px solid ${T.bdr}` }}>
-                      <span style={{ fontSize: 12 }}>
-                        👤 {pn.n}
+                    <div key={personStableKey(pn)} style={{ display: "flex", alignItems: "center", gap: 5, background: looksLikeUuid ? T.wdim : T.card2, borderRadius: 999, padding: "5px 10px", border: `1px solid ${looksLikeUuid ? T.warn + "44" : T.bdr}` }}>
+                      <span style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <Users size={10} color={T.sub} />
+                        {looksLikeUuid ? "Unnamed friend" : pn.n}
                         {pn.u || pn.e ? <span style={{ fontSize: 9, color: T.acc, marginLeft: 3 }}>●</span> : null}
                       </span>
-                      <button type="button" onClick={() => void persistPeople(people.map(normalizePerson).filter((x) => !sameSplitPerson(x, pn)))} style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}>
+                      <button
+                        type="button"
+                        aria-label="Rename"
+                        title="Rename contact"
+                        onClick={async () => {
+                          const ok = await dlg.confirm(
+                            looksLikeUuid
+                              ? "This contact has no real name — ask your friend to set their display name in Profile, then re-scan. Or enter a nickname to use locally."
+                              : `Rename "${pn.n}" to a new nickname?`,
+                            { title: "Rename contact", confirmLabel: "Rename", cancelLabel: "Cancel" }
+                          );
+                          if (!ok) return;
+                          const next = window.prompt("New name", looksLikeUuid ? "" : pn.n);
+                          const newName = (next || "").trim();
+                          if (!newName) return;
+                          const updated = people.map(normalizePerson).map((x) => sameSplitPerson(x, pn) ? { ...x, n: newName } : x);
+                          void persistPeople(updated);
+                          dlg.toast("Contact renamed", { type: "success" });
+                        }}
+                        style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}
+                      >
+                        <Pencil size={11} />
+                      </button>
+                      <button type="button" aria-label="Remove" onClick={() => void persistPeople(people.map(normalizePerson).filter((x) => !sameSplitPerson(x, pn)))} style={{ background: "none", border: "none", color: T.mut, cursor: "pointer", padding: 0, display: "flex", lineHeight: 1 }}>
                         <X size={12} />
                       </button>
                     </div>
@@ -4973,26 +5124,71 @@ export default function App({ onReady }) {
             <p style={{ fontSize: 13, color: T.sub, lineHeight: 1.45, marginBottom: 16 }}>
               Friends tap <strong style={{ color: T.txt }}>Scan</strong> under Split Contacts and point at this code. They’ll get your name and linked ID so you can pick each other when splitting expenses.
             </p>
-            <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 16px", background: "#fff", borderRadius: 12 }}>
-              <QRCodeSVG
-                value={buildSplitSharePayload({
-                  email: firebaseUser.email,
-                  uuid: profileTagUuid || "",
-                  name: profileName.trim() || (firebaseUser.email || "").split("@")[0] || "Friend",
-                })}
-                size={200}
-                level="M"
-                bgColor="#ffffff"
-                fgColor="#000000"
-              />
-            </div>
+            {profileName.trim() ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 16px", background: "#fff", borderRadius: 12 }}>
+                <QRCodeSVG
+                  value={buildSplitSharePayload({
+                    email: firebaseUser.email,
+                    uuid: profileTagUuid || "",
+                    name: profileName.trim(),
+                  })}
+                  size={200}
+                  level="M"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
+              </div>
+            ) : (
+              <div style={{ padding: "16px 14px", background: T.wdim, border: `1px solid ${T.warn}44`, borderRadius: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.warn, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                  <AlertTriangle size={14} /> Set your display name first
+                </div>
+                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.4, marginBottom: 10 }}>
+                  Friends need a real name to recognise you in splits. Enter one here, then we'll generate your QR code.
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g. Alex Johnson"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  style={{ ...inp, marginBottom: 8 }}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const name = profileName.trim();
+                    if (!name) { dlg.toast("Name cannot be empty", { type: "warn" }); return; }
+                    if (uidRef.current) {
+                      try {
+                        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { profileName: name }, { merge: true });
+                        dlg.toast("Name saved", { type: "success" });
+                      } catch (err) {
+                        console.error("Failed to save profile name", err);
+                        dlg.toast("Couldn't save name", { type: "error" });
+                      }
+                    }
+                  }}
+                  disabled={!profileName.trim()}
+                  style={{
+                    width: "100%", padding: "10px 12px", borderRadius: 10, border: "none",
+                    background: profileName.trim() ? T.acc : T.card2,
+                    color: profileName.trim() ? T.btnTxt : T.mut,
+                    fontWeight: 700, fontSize: 13, cursor: profileName.trim() ? "pointer" : "not-allowed",
+                  }}
+                >
+                  Save name
+                </button>
+              </div>
+            )}
             <button
               type="button"
+              disabled={!profileName.trim()}
               onClick={() => {
+                if (!profileName.trim()) { dlg.toast("Set a display name first", { type: "warn" }); return; }
                 const t = buildSplitSharePayload({
                   email: firebaseUser.email,
                   uuid: profileTagUuid || "",
-                  name: profileName.trim() || (firebaseUser.email || "").split("@")[0] || "Friend",
+                  name: profileName.trim(),
                 });
                 void navigator.clipboard.writeText(t).then(() => {
                   setProfileQrCopied(true);
@@ -5282,6 +5478,8 @@ export default function App({ onReady }) {
         formatMoney={formatMoney}
         dateLocale={dateLocale || locale}
         splitContacts={people}
+        selfProfileUuid={profileTagUuid || ""}
+        selfName={profileName || ""}
         onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
         onEdit={(txId, updates) => void editTransaction(txId, updates)}
         onClose={() => setSelectedTx(null)}

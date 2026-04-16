@@ -17,6 +17,8 @@ export function TxDetail({
   onEdit,
   splitContacts = [],
   onSaveSplit,
+  selfProfileUuid = "",
+  selfName = "",
 }) {
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
@@ -58,10 +60,25 @@ export function TxDetail({
   const hasLineItems = Array.isArray(tx.lineItems) && tx.lineItems.length > 0;
   const hasTags = Array.isArray(tx.tags) && tx.tags.length > 0;
   const txAmt = Number(tx.amount) || 0;
-  const canEditSplit = typeof onSaveSplit === "function" && !tx.syncedFromUid;
+  const isMirror = Boolean(tx.syncedFromUid);
+  const canEditSplit = typeof onSaveSplit === "function" && !isMirror;
   const contacts = Array.isArray(splitContacts) ? splitContacts.map(normalizePerson).filter((p) => p.n) : [];
 
   const hasSavedSplit = tx.split?.people?.length > 0;
+  const peopleSafe = Array.isArray(tx.split?.people) ? tx.split.people : [];
+
+  /* Mirror view perspective — the slave's own entry in the split list, plus the owner's implied share. */
+  const selfEntry = isMirror && selfProfileUuid
+    ? peopleSafe.find((p) => p && typeof p.u === "string" && p.u === selfProfileUuid)
+    : null;
+  const otherPeople = isMirror && selfEntry
+    ? peopleSafe.filter((p) => p !== selfEntry)
+    : peopleSafe;
+  const ownerImpliedShare = (() => {
+    if (!isMirror || !hasSavedSplit) return 0;
+    const sum = peopleSafe.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
+    return Math.max(0, txAmt - sum);
+  })();
 
   function openSplitEditor() {
     if (hasSavedSplit) {
@@ -149,7 +166,7 @@ export function TxDetail({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 16px 10px" }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{editing ? "Edit Transaction" : "Transaction Details"}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {!editing && onEdit && (
+            {!editing && onEdit && !isMirror && (
               <button type="button" onClick={startEdit} style={{ background: T.adim, border: `1px solid ${T.acc}44`, color: T.acc, cursor: "pointer", padding: "5px 10px", borderRadius: 8, display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600 }}>
                 <Pencil size={12} /> Edit
               </button>
@@ -233,8 +250,11 @@ export function TxDetail({
 
             {/* Split Summary (read-only, when split exists and NOT editing) */}
             {hasSavedSplit && !splitEditing && (() => {
-              const pplSum = tx.split.people.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
-              const yourShare = txAmt - pplSum;
+              const pplSum = peopleSafe.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
+              const yourShare = isMirror
+                ? (selfEntry ? (parseFloat(String(selfEntry.a)) || 0) : 0)
+                : (txAmt - pplSum);
+              const ownerLabel = "Owner"; // Future: name lookup by syncedFromUid
               return (
                 <div style={{ padding: "0 16px" }}>
                   <div style={{ ...sectionCard, background: `${T.acc}08`, borderColor: `${T.acc}33` }}>
@@ -244,6 +264,11 @@ export function TxDetail({
                           <Users size={14} color={T.acc} />
                         </div>
                         <span style={{ fontSize: 13, fontWeight: 700 }}>Split</span>
+                        {isMirror ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: T.warn, background: T.wdim, border: `1px solid ${T.warn}44`, borderRadius: 6, padding: "2px 6px", letterSpacing: 0.4 }}>
+                            SHARED WITH YOU
+                          </span>
+                        ) : null}
                       </div>
                       {canEditSplit && (
                         <div style={{ display: "flex", gap: 6 }}>
@@ -258,12 +283,27 @@ export function TxDetail({
                         </div>
                       )}
                     </div>
+                    {isMirror ? (
+                      <div style={{ fontSize: 11, color: T.sub, marginBottom: 8, lineHeight: 1.45 }}>
+                        You can only view this split — the person who added the bill can edit it.
+                      </div>
+                    ) : null}
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.acc} /> You</span>
+                        <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+                          <Users size={12} color={T.acc} /> {selfName || "You"}{isMirror ? " (you)" : ""}
+                        </span>
                         <span style={{ fontSize: 13, fontWeight: 700, color: T.acc }}>{formatMoney(yourShare)}</span>
                       </div>
-                      {tx.split.people.map((p, i) => (
+                      {isMirror && ownerImpliedShare > 0 ? (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+                            <Users size={12} color={T.sub} /> {ownerLabel}
+                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(ownerImpliedShare)}</span>
+                        </div>
+                      ) : null}
+                      {otherPeople.map((p, i) => (
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><Users size={12} color={T.sub} /> {p.n}</span>
                           <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(p.a)}</span>
@@ -421,11 +461,16 @@ export function TxDetail({
               </div>
             )}
 
-            {/* Delete */}
+            {/* Delete / dismiss */}
             <div style={{ padding: "6px 16px 36px" }}>
+              {isMirror ? (
+                <div style={{ fontSize: 11, color: T.sub, marginBottom: 8, lineHeight: 1.5, textAlign: "center" }}>
+                  This bill was shared with you. Removing it only hides it from your list.
+                </div>
+              ) : null}
               <button type="button" onClick={handleDelete}
                 style={{ width: "100%", padding: 12, borderRadius: 12, background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <Trash2 size={15} /> Delete Transaction
+                <Trash2 size={15} /> {isMirror ? "Remove from my list" : "Delete Transaction"}
               </button>
             </div>
           </>

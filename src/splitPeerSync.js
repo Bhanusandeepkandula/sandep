@@ -122,7 +122,7 @@ export function buildMirrorTransaction(tx, syncedFromUid) {
 }
 
 export async function upsertSplitMirrors(db, ownerUid, tx) {
-  const result = { attempted: 0, succeeded: 0, failed: 0, unresolved: [], peerUids: [] };
+  const result = { attempted: 0, succeeded: 0, failed: 0, unresolved: [], peerUids: [], permissionDenied: false };
   if (!tx?.id || !tx?.split?.people?.length) return result;
 
   // Track people without any resolution path
@@ -148,6 +148,9 @@ export async function upsertSplitMirrors(db, ownerUid, tx) {
       result.peerUids.push(peerUid);
     } catch (e) {
       result.failed += 1;
+      if (e?.code === "permission-denied" || String(e?.message).includes("insufficient permissions")) {
+        result.permissionDenied = true;
+      }
       console.error("upsertSplitMirrors failed for peer:", peerUid, e);
     }
   }

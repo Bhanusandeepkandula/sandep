@@ -965,7 +965,13 @@ export default function App({ onReady }) {
           const result = await upsertSplitMirrors(db, uidRef.current, merged);
           if (result && (result.unresolved?.length || result.failed > 0)) {
             const missing = (result.unresolved || []).filter(Boolean);
-            if (missing.length) {
+            if (result.permissionDenied) {
+              dlg.toast("Firestore rules not deployed — split saved locally only. Tap to fix.", {
+                type: "error", duration: 10000, title: "Rules needed",
+                actionLabel: "Open Console",
+                onClick: () => window.open("https://console.firebase.google.com/project/sandeep-1fc6b/firestore/rules", "_blank"),
+              });
+            } else if (missing.length) {
               dlg.toast(
                 `${missing.join(", ")} ${missing.length === 1 ? "doesn't have" : "don't have"} a linked profile — they won't see this split until they add you back.`,
                 { type: "warn", duration: 7000, title: "Split saved locally" }
@@ -1381,13 +1387,19 @@ export default function App({ onReady }) {
           const result = await upsertSplitMirrors(db, uidRef.current, newTx);
           if (result && (result.unresolved?.length || result.failed > 0)) {
             const missing = (result.unresolved || []).filter(Boolean);
-            if (missing.length) {
+            if (result.permissionDenied) {
+              dlg.toast("Firestore rules not deployed — split saved locally only. Tap to fix.", {
+                type: "error", duration: 10000, title: "Rules needed",
+                actionLabel: "Open Console",
+                onClick: () => window.open("https://console.firebase.google.com/project/sandeep-1fc6b/firestore/rules", "_blank"),
+              });
+            } else if (missing.length) {
               dlg.toast(
                 `${missing.join(", ")} ${missing.length === 1 ? "doesn't have" : "don't have"} a linked profile — they won't see this split until they link back via QR.`,
                 { type: "warn", duration: 7000, title: "Split saved locally" }
               );
             } else if (result.failed > 0) {
-              dlg.toast(`Couldn't sync split to ${result.failed} friend${result.failed === 1 ? "" : "s"}. We'll retry next time.`, { type: "error", duration: 5000 });
+              dlg.toast(`Couldn't sync split to ${result.failed} friend${result.failed === 1 ? "" : "s"}. Check your connection.`, { type: "error", duration: 5000 });
             }
           } else if (result && result.succeeded > 0) {
             dlg.toast(`Split sent to ${result.succeeded} friend${result.succeeded === 1 ? "" : "s"}`, { type: "success", duration: 3000 });

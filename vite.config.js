@@ -151,12 +151,17 @@ function ocrCsvApiPlugin(mode, cwd) {
             if (!warnedMissingOpenAi) {
               warnedMissingOpenAi = true;
               console.warn(
-                "\n[vite] OPENAI_API_KEY is missing. OCR → CSV needs it in .env.local (never commit keys). Restart dev after adding.\n"
+                "\n[vite] OPENAI_API_KEY is missing. Set it in .env.local or .env (see .env.example), or export OPENAI_API_KEY; restart dev after adding.\n"
               );
             }
             res.statusCode = 503;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "OPENAI_API_KEY missing in .env.local" }));
+            res.end(
+              JSON.stringify({
+                error:
+                  "OPENAI_API_KEY is not set. Add it to project-root .env.local or .env (see .env.example), or export OPENAI_API_KEY in your shell, then restart the dev server.",
+              })
+            );
             return;
           }
           const csv = await openAiOcrToCsv(key, ocrText);
@@ -187,7 +192,12 @@ function ocrCsvApiPlugin(mode, cwd) {
           if (!key) {
             res.statusCode = 503;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "OPENAI_API_KEY missing in .env.local" }));
+            res.end(
+              JSON.stringify({
+                error:
+                  "OPENAI_API_KEY is not set. Add it to project-root .env.local or .env (see .env.example), or export OPENAI_API_KEY in your shell, then restart the dev server.",
+              })
+            );
             return;
           }
           const csv = await openAiOcrToCsv(key, ocrText);

@@ -33,7 +33,7 @@ import { T, card, card2, inp, lbl, pill } from "./config.js";
 import { uid, tdStr, dAgo, getCat, fmt, filterTx, tot } from "./utils.js";
 import { TxRow } from "./TxRow.jsx";
 import { BudgetBar } from "./BudgetBar.jsx";
-import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
 import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
@@ -46,6 +46,9 @@ import {
   isValidPin,
   PENDING_LOGIN_EMAIL_KEY,
 } from "./auth/pinProfiles.js";
+import { parseExpenseCsv } from "./importParse.js";
+import { extractExpenseJson, normalizeScanResult } from "./scanAi.js";
+import { uploadReceiptImage } from "./receiptUpload.js";
 
 const API = `${import.meta.env.BASE_URL}anthropic/v1/messages`;
 
@@ -84,10 +87,24 @@ export default function App() {
   const [splitType, setSplitType] = useState("equal");
   const [splitPpl, setSplitPpl] = useState([]);
   const [previewImg, setPreviewImg] = useState(null);
+  /** Optional rows from last AI scan (line items). */
+  const [scanLineItems, setScanLineItems] = useState(null);
+  /** During image/statement scan: read → ai → parse. */
+  const [scanPhase, setScanPhase] = useState(null);
   const [scanErr, setScanErr] = useState("");
   const fileRef = useRef();
   const stmtRef = useRef();
+  const csvRef = useRef();
   const mainScrollRef = useRef(null);
+  /** User cancelled mid-scan or navigated away from processing. */
+  const scanCancelledRef = useRef(false);
+  /** Abort in-flight Anthropic request when user cancels. */
+  const scanFetchAbortRef = useRef(null);
+  /** Parsed CSV ready to confirm (one file per import). */
+  const [importBundle, setImportBundle] = useState(null);
+  const [importSaving, setImportSaving] = useState(false);
+  /** When set, success screen shows bulk-import copy. */
+  const [bulkSuccess, setBulkSuccess] = useState(null);
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -493,6 +510,9 @@ export default function App() {
 
   /** Success screen, then Home + toast so saving is obvious even if the check view was scrolled away. */
   function schedulePostSaveReset(newTx) {
+    setBulkSuccess(null);
+    setFErr("");
+    setScanErr("");
     setStep("success");
     setTimeout(() => {
       setStep("mode");
@@ -501,6 +521,7 @@ export default function App() {
       setSplitOn(false);
       setSplitPpl([]);
       setPreviewImg(null);
+      setScanLineItems(null);
       setTab("home");
       setSaveToast(`${formatMoney(newTx.amount)} · ${newTx.category}`);
       setTimeout(() => setSaveToast(null), 4500);
@@ -534,6 +555,7 @@ export default function App() {
       return;
     }
     setFErr("");
+    setScanErr("");
     const splitNormalized =
       splitOn && splitPpl.length > 0
         ? {
@@ -568,6 +590,16 @@ export default function App() {
     }
     setSavingExpense(true);
     try {
+      let receiptUrl = "";
+      if (previewImg) {
+        try {
+          receiptUrl = await uploadReceiptImage(previewImg, uidRef.current, newTx.id);
+        } catch (e) {
+          console.error(e);
+          setScanErr("Receipt photo could not be uploaded (deploy Storage rules). Saving without attachment.");
+        }
+      }
+      if (receiptUrl) newTx.receiptUrl = receiptUrl;
       await setDoc(doc(db, "users", uidRef.current, "transactions", newTx.id), sanitizeForFirestore(newTx));
     } catch (e) {
       console.error(e);
@@ -580,38 +612,111 @@ export default function App() {
     schedulePostSaveReset(newTx);
   }
 
+  function notifyScanReadyIfBackground() {
+    try {
+      if (typeof document === "undefined" || !document.hidden) return;
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      new Notification("Receipt ready", {
+        body: "Open the app to review, edit, and save your expense.",
+        tag: "track-receipt-scan",
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function cancelActiveScan() {
+    scanCancelledRef.current = true;
+    try {
+      scanFetchAbortRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    scanFetchAbortRef.current = null;
+    setScanPhase(null);
+    setStep("mode");
+    setPreviewImg(null);
+    setScanLineItems(null);
+    setScanErr("");
+    try {
+      if (fileRef.current) fileRef.current.value = "";
+      if (stmtRef.current) stmtRef.current.value = "";
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function processFile(e, isStatement = false) {
     const input = e.target;
     const f = input.files?.[0];
     if (!f) return;
+    scanCancelledRef.current = false;
+    scanFetchAbortRef.current?.abort();
+    scanFetchAbortRef.current = new AbortController();
+    const fetchSignal = scanFetchAbortRef.current.signal;
+    if ("Notification" in window && Notification.permission === "default") {
+      try {
+        void Notification.requestPermission();
+      } catch {
+        /* ignore */
+      }
+    }
     setScanErr("");
+    setScanPhase("read");
     setStep("processing");
     const reader = new FileReader();
     reader.onerror = () => {
       setScanErr("Could not read this file from your device.");
+      setScanPhase(null);
       setStep("form");
       input.value = "";
+      scanFetchAbortRef.current = null;
     };
     reader.onload = async (ev) => {
       try {
+        if (scanCancelledRef.current) return;
         const raw = ev.target.result;
         if (typeof raw !== "string" || !raw.includes(",")) {
           setScanErr("Could not read file as image or PDF.");
+          setScanPhase(null);
           setStep("form");
           return;
         }
         const b64 = raw.split(",")[1];
         if (!isStatement) setPreviewImg(raw);
+        setScanPhase("ai");
 
-        const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
-        const catList = catNames.length ? catNames.join(", ") : "(no categories configured in database)";
+        const cats = catalogRef.current.categories || [];
+        const catNames = cats.map((c) => c.n).filter(Boolean);
+        const payNames = (catalogRef.current.payments || []).filter(Boolean);
+        const catList = catNames.length ? catNames.join(", ") : "Food, Travel, Shopping, Bills (match your app)";
+        const payList = payNames.length ? payNames.join(", ") : "Cash, Card, UPI";
+
+        const lower = f.name?.toLowerCase() || "";
+        const mediaType =
+          f.type && f.type.length > 0 ? f.type : lower.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+
+        if (scanCancelledRef.current) return;
+
         const r = await fetch(API, {
+          signal: fetchSignal,
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 400,
-            system: `You are a receipt/bill/bank-statement OCR system. Return ONLY valid JSON: {amount:number,category:string(must be one of: ${catList}),date:string YYYY-MM-DD,notes:string}`,
+            max_tokens: 1400,
+            system: `You extract structured expense data from receipt or bank-statement images. Return ONLY one JSON object — no markdown, no commentary before or after.
+
+The JSON must include:
+- total (number): final payable amount (Grand Total / TOTAL / Net Payable / Amount Due). If only line rows are printed with no total, set total to the sum of line_items amounts.
+- amount (number): same numeric value as total.
+- category (string): EXACTLY one label from this list (copy spelling): ${catList}
+- date (string): YYYY-MM-DD
+- notes (string): merchant name or short description
+- payment (string, optional): best match from: ${payList}
+- line_items (optional): array of { "name": string, "amount": number } for each printed line
+
+Use plain numbers for amounts (no currency symbols inside JSON). Never invent a category not in the list.`,
             messages: [
               {
                 role: "user",
@@ -620,19 +725,20 @@ export default function App() {
                     type: "image",
                     source: {
                       type: "base64",
-                      media_type: f.type.includes("pdf") ? "application/pdf" : f.type,
+                      media_type: mediaType,
                       data: b64,
                     },
                   },
                   {
                     type: "text",
-                    text: `Extract expense info from this ${isStatement ? "bank statement" : "receipt/bill"}. Return only JSON.`,
+                    text: `Analyze this ${isStatement ? "bank or card statement" : "receipt or bill image"} and return only the JSON object.`,
                   },
                 ],
               },
             ],
           }),
         });
+        if (scanCancelledRef.current) return;
         const bodyText = await r.text();
         let d = {};
         try {
@@ -641,44 +747,183 @@ export default function App() {
           /* ignore */
         }
         if (!r.ok) {
-          const raw =
+          const rawErr =
             d.error?.message ||
             (bodyText.length > 180 ? `${bodyText.slice(0, 180)}…` : bodyText) ||
             `Scan request failed (${r.status}).`;
           const needsKey =
-            typeof raw === "string" &&
-            (raw.toLowerCase().includes("x-api-key") || raw.toLowerCase().includes("api key"));
+            typeof rawErr === "string" &&
+            (rawErr.toLowerCase().includes("x-api-key") || rawErr.toLowerCase().includes("api key"));
           setScanErr(
             needsKey
-              ? `Anthropic key missing: ${raw.trim()} In the project folder, create or edit .env.local with ANTHROPIC_API_KEY=your_key (from console.anthropic.com), save, then stop and restart npm run dev. Deployed sites need a backend proxy; local dev uses Vite only.`
-              : `${raw} For scans, set ANTHROPIC_API_KEY in .env.local and use npm run dev.`
+              ? `Anthropic key missing: ${rawErr.trim()} In the project folder, create or edit .env.local with ANTHROPIC_API_KEY=your_key (from console.anthropic.com), save, then stop and restart npm run dev. Deployed sites need a backend proxy; local dev uses Vite only.`
+              : `${rawErr} For scans, set ANTHROPIC_API_KEY in .env.local and use npm run dev.`
           );
+          setScanPhase(null);
           setStep("form");
           return;
         }
-        const txt = d.content?.find((c) => c.type === "text")?.text || "{}";
-        let ex = {};
+        if (scanCancelledRef.current) return;
+        setScanPhase("parse");
+        let txt = "";
+        for (const block of d.content || []) {
+          if (block && block.type === "text" && block.text) txt += block.text;
+        }
+        const rawJson = extractExpenseJson(txt || "{}");
+        const normalized = normalizeScanResult(rawJson, {
+          categoryNames: catNames,
+          payments: payNames,
+          defaultPayment: payNames[0] || "",
+          defaultDate: tdStr(),
+        });
+        const items = Array.isArray(normalized.lineItems) ? normalized.lineItems.slice(0, 50) : [];
+        setScanLineItems(items.length ? items : null);
+        setForm((p) => ({
+          ...p,
+          amount: normalized.amount,
+          category: normalized.category,
+          date: normalized.date || tdStr(),
+          payment: normalized.payment || p.payment || payNames[0] || "",
+          notes: normalized.notes || p.notes,
+        }));
+        if (!normalized.amount || parseFloat(normalized.amount) <= 0) {
+          setScanErr(
+            "Could not read a clear total from this image. Enter the amount manually, or try a clearer photo."
+          );
+        } else {
+          setScanErr("");
+        }
+        notifyScanReadyIfBackground();
+        setScanPhase(null);
+        setStep("form");
+      } catch (err) {
+        const aborted = err?.name === "AbortError" || scanCancelledRef.current;
+        if (aborted) {
+          setScanPhase(null);
+          return;
+        }
+        console.error(err);
+        setScanErr(err instanceof Error ? err.message : "Scan failed. Check network and API setup.");
+        setScanPhase(null);
+        setStep("form");
+      } finally {
         try {
-          ex = JSON.parse(txt.replace(/```json?|```/g, "").trim());
+          input.value = "";
         } catch {
           /* ignore */
         }
-        setForm((p) => ({
-          ...p,
-          amount: ex.amount ? String(ex.amount) : p.amount,
-          category: ex.category || p.category,
-          date: ex.date || p.date,
-          notes: ex.notes || p.notes,
-        }));
-      } catch (err) {
-        console.error(err);
-        setScanErr(err instanceof Error ? err.message : "Scan failed. Check network and API setup.");
-        setStep("form");
-      } finally {
-        input.value = "";
+        scanFetchAbortRef.current = null;
       }
     };
     reader.readAsDataURL(f);
+  }
+
+  function processCsvFile(e) {
+    const input = e.target;
+    const f = input.files?.[0];
+    if (!f) return;
+    setScanErr("");
+    const reader = new FileReader();
+    reader.onerror = () => {
+      setScanErr("Could not read this file from your device.");
+      input.value = "";
+    };
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
+      const payNames = (catalogRef.current.payments || []).filter(Boolean);
+      const { rows, fatal } = parseExpenseCsv(text, { categories: catNames, payments: payNames });
+      input.value = "";
+      if (fatal) {
+        setScanErr(fatal);
+        return;
+      }
+      const okCount = rows.filter((r) => r.ok).length;
+      if (okCount === 0) {
+        setScanErr("No valid rows. Fix category names or amounts and try again.");
+        return;
+      }
+      setImportBundle({ fileName: f.name, rows });
+      setAddMode("import");
+      setStep("importPreview");
+    };
+    reader.readAsText(f);
+  }
+
+  function finishBulkImportSuccess(count, totalAmount) {
+    setBulkSuccess({ count, total: totalAmount });
+    setStep("success");
+    setImportBundle(null);
+    setTimeout(() => {
+      setStep("mode");
+      setBulkSuccess(null);
+      const pay = catalogRef.current.payments[0] || "";
+      setForm({ amount: "", category: "", date: tdStr(), payment: pay, notes: "", tags: "" });
+      setTab("home");
+      setSaveToast(`Imported ${count} · ${formatMoney(totalAmount)}`);
+      setTimeout(() => setSaveToast(null), 4500);
+    }, 2400);
+  }
+
+  async function saveImportedRows() {
+    if (!importBundle) return;
+    const valid = importBundle.rows.filter((r) => r.ok);
+    if (!valid.length) return;
+    const tagUuid = (profileTagUuid && String(profileTagUuid).trim()) || uidRef.current || "";
+    const totalAmount = valid.reduce((s, r) => s + r.amount, 0);
+
+    if (!uidRef.current) {
+      if (fbStatus !== "error") {
+        setScanErr("Cloud sync not ready yet — wait a moment and try again.");
+        return;
+      }
+      const additions = valid.map((r) => ({
+        id: uid(),
+        amount: r.amount,
+        category: r.category,
+        date: r.date,
+        payment: r.payment,
+        notes: r.notes,
+        tags: r.tags,
+        split: null,
+        appProfileUuid: tagUuid,
+      }));
+      setTxs((p) => [...additions, ...p]);
+      finishBulkImportSuccess(additions.length, totalAmount);
+      return;
+    }
+
+    setImportSaving(true);
+    setScanErr("");
+    try {
+      const chunkSize = 450;
+      for (let i = 0; i < valid.length; i += chunkSize) {
+        const part = valid.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        for (const r of part) {
+          const id = uid();
+          const newTx = {
+            id,
+            amount: r.amount,
+            category: r.category,
+            date: r.date,
+            payment: r.payment,
+            notes: r.notes,
+            tags: r.tags,
+            split: null,
+            appProfileUuid: tagUuid,
+          };
+          batch.set(doc(db, "users", uidRef.current, "transactions", id), sanitizeForFirestore(newTx));
+        }
+        await batch.commit();
+      }
+      finishBulkImportSuccess(valid.length, totalAmount);
+    } catch (e) {
+      console.error(e);
+      setScanErr("Could not import. Check your connection.");
+    } finally {
+      setImportSaving(false);
+    }
   }
 
   async function genTips() {
@@ -1160,14 +1405,23 @@ export default function App() {
         {tab === "add" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px`, display: "flex", alignItems: "center", gap: 12 }}>
-              {step === "form" && (
+              {(step === "form" || step === "importPreview" || step === "processing") && (
                 <button
                   type="button"
+                  aria-label={step === "processing" ? "Cancel scan" : "Back"}
                   onClick={() => {
+                    if (step === "processing") {
+                      cancelActiveScan();
+                      return;
+                    }
                     setStep("mode");
                     setScanErr("");
+                    setImportBundle(null);
+                    setPreviewImg(null);
+                    setScanLineItems(null);
+                    setScanPhase(null);
                   }}
-                  style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}
+                  style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4, minWidth: 44, minHeight: 44 }}
                 >
                   <ArrowLeft size={20} />
                 </button>
@@ -1177,19 +1431,28 @@ export default function App() {
                   ? "Add Expense"
                   : step === "form"
                     ? "Expense Details"
-                    : step === "processing"
-                      ? "Scanning Bill…"
-                      : step === "success"
-                        ? "Saved!"
-                        : "Add Expense"}
+                    : step === "importPreview"
+                      ? "Review import"
+                      : step === "processing"
+                        ? "Scanning…"
+                        : step === "success"
+                          ? "Saved!"
+                          : "Add Expense"}
               </div>
             </div>
 
-            {step === "mode" && (
+              {step === "mode" && (
               <div style={{ padding: `0 ${px}px` }}>
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>Choose how to add your expense</div>
                 {[
                   { mode: "manual", icon: "✏️", title: "Manual Entry", sub: "Type in amount & details", col: T.acc },
+                  {
+                    mode: "import",
+                    icon: "📋",
+                    title: "Import CSV",
+                    sub: "One .csv file — category names must match your app",
+                    col: T.warn,
+                  },
                   { mode: "image", icon: "📷", title: "Scan Receipt / Bill", sub: "AI extracts details from photo", col: T.blue },
                   { mode: "statement", icon: "📄", title: "Upload Statement", sub: "Bank or credit card PDF", col: T.purp },
                 ].map((opt) => (
@@ -1200,6 +1463,7 @@ export default function App() {
                     onClick={() => {
                       setAddMode(opt.mode);
                       if (opt.mode === "manual") setStep("form");
+                      else if (opt.mode === "import") csvRef.current?.click();
                       else if (opt.mode === "image") fileRef.current?.click();
                       else stmtRef.current?.click();
                     }}
@@ -1207,6 +1471,7 @@ export default function App() {
                       if (e.key === "Enter" || e.key === " ") {
                         setAddMode(opt.mode);
                         if (opt.mode === "manual") setStep("form");
+                        else if (opt.mode === "import") csvRef.current?.click();
                         else if (opt.mode === "image") fileRef.current?.click();
                         else stmtRef.current?.click();
                       }
@@ -1232,18 +1497,167 @@ export default function App() {
                 ))}
                 <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => void processFile(e, false)} />
                 <input ref={stmtRef} type="file" accept="image/*,.pdf,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
+                <input
+                  ref={csvRef}
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  style={{ display: "none" }}
+                  onChange={(e) => processCsvFile(e)}
+                />
+              </div>
+            )}
+
+            {step === "importPreview" && importBundle && (
+              <div
+                style={{
+                  padding: `0 ${px}px`,
+                  paddingBottom: `max(28px, calc(16px + env(safe-area-inset-bottom, 0px)))`,
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div style={{ fontSize: 13, color: T.sub, marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600, color: T.txt }}>{importBundle.fileName}</span>
+                  <span style={{ marginLeft: 8 }}>
+                    {importBundle.rows.filter((r) => r.ok).length} ready
+                    {importBundle.rows.some((r) => !r.ok) ? ` · ${importBundle.rows.filter((r) => !r.ok).length} skipped` : ""}
+                  </span>
+                </div>
+
+                <details style={{ ...card2, marginBottom: 14, fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, color: T.txt }}>CSV format (required columns)</summary>
+                  <div style={{ marginTop: 10 }}>
+                    Header row + columns: <code style={{ color: T.acc }}>amount</code>, <code style={{ color: T.acc }}>date</code>,{" "}
+                    <code style={{ color: T.acc }}>category</code> (must match your app categories). Optional:{" "}
+                    <code>payment</code>, <code>notes</code>, <code>tags</code>. Parser:{" "}
+                    <a href="https://www.papaparse.com/" target="_blank" rel="noopener noreferrer" style={{ color: T.blue }}>
+                      Papa Parse
+                    </a>
+                    . Full spec: <code style={{ fontSize: 11 }}>docs/IMPORT_CSV.md</code> in the repo.
+                  </div>
+                </details>
+
+                {scanErr && (
+                  <div
+                    style={{
+                      background: T.ddim,
+                      border: "1px solid rgba(239,68,68,0.35)",
+                      borderRadius: T.r,
+                      padding: "10px 14px",
+                      marginBottom: 14,
+                      fontSize: 13,
+                      color: T.dng,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {scanErr}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    maxHeight: isMobile ? 280 : 360,
+                    overflow: "auto",
+                    borderRadius: T.r,
+                    border: `1px solid ${T.bdr}`,
+                    marginBottom: 16,
+                  }}
+                >
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: T.card2, position: "sticky", top: 0 }}>
+                        <th style={{ textAlign: "left", padding: "8px 10px", color: T.sub }}>#</th>
+                        <th style={{ textAlign: "left", padding: "8px 6px", color: T.sub }}>Status</th>
+                        <th style={{ textAlign: "right", padding: "8px 6px", color: T.sub }}>Amount</th>
+                        <th style={{ textAlign: "left", padding: "8px 6px", color: T.sub }}>Date</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", color: T.sub }}>Category</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importBundle.rows.map((r) => (
+                        <tr key={r.line} style={{ borderTop: `1px solid ${T.bdr}` }}>
+                          <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
+                          <td
+                            title={!r.ok && r.error ? r.error : undefined}
+                            style={{
+                              padding: "8px 6px",
+                              color: r.ok ? T.acc : T.dng,
+                              maxWidth: 130,
+                              fontSize: r.ok ? 12 : 11,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {r.ok ? "✓" : r.error}
+                          </td>
+                          <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 600 }}>{r.ok ? formatMoney(r.amount) : "—"}</td>
+                          <td style={{ padding: "8px 6px", color: T.sub }}>{r.date}</td>
+                          <td style={{ padding: "8px 10px" }}>{r.category || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={importSaving || importBundle.rows.every((r) => !r.ok)}
+                  onClick={() => void saveImportedRows()}
+                  style={{
+                    width: "100%",
+                    padding: "16px 18px",
+                    borderRadius: T.rLg,
+                    background: importSaving || importBundle.rows.every((r) => !r.ok) ? T.mut : T.acc,
+                    border: "none",
+                    color: "#000",
+                    fontSize: 17,
+                    fontWeight: 800,
+                    cursor: importSaving ? "not-allowed" : "pointer",
+                    minHeight: 52,
+                  }}
+                >
+                  {importSaving ? "Saving…" : `Add ${importBundle.rows.filter((r) => r.ok).length} expenses`}
+                </button>
               </div>
             )}
 
             {step === "processing" && (
-              <div style={{ padding: `70px ${px}px`, textAlign: "center" }}>
-                <div style={{ fontSize: 56, marginBottom: 18 }}>🔍</div>
-                <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>AI is reading your document…</div>
-                <div style={{ fontSize: 13, color: T.sub, marginBottom: 24 }}>Extracting amount, category & date</div>
-                <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: T.acc, opacity: 0.3 + i * 0.35 }} />
-                  ))}
+              <div style={{ padding: `48px ${px}px`, textAlign: "center" }}>
+                <div style={{ fontSize: 52, marginBottom: 16 }}>🔍</div>
+                <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Scanning with AI…</div>
+                <div style={{ fontSize: 13, color: T.sub, marginBottom: 22 }}>
+                  Use ← to cancel. Keep this tab open for best results.
+                </div>
+                <div style={{ textAlign: "left", maxWidth: 320, margin: "0 auto", fontSize: 13 }}>
+                  {[
+                    { id: "read", label: "Reading file from your device" },
+                    { id: "ai", label: "Sending image to AI (Claude)" },
+                    { id: "parse", label: "Parsing total, category & lines" },
+                  ].map((row, i) => {
+                    const order = ["read", "ai", "parse"];
+                    const phase = order.includes(scanPhase) ? scanPhase : "read";
+                    const idx = order.indexOf(phase);
+                    const done = idx > i;
+                    const active = phase === row.id;
+                    return (
+                      <div
+                        key={row.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "10px 0",
+                          borderBottom: i < 2 ? `1px solid ${T.bdr}` : "none",
+                          color: done || active ? T.txt : T.mut,
+                          fontWeight: active ? 700 : 500,
+                        }}
+                      >
+                        <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
+                        {row.label}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1266,7 +1680,9 @@ export default function App() {
                 >
                   <Check size={38} color={T.acc} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>Expense Added!</div>
+                <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>
+                  {bulkSuccess ? `Imported ${bulkSuccess.count} expenses!` : "Expense Added!"}
+                </div>
                 <div style={{ fontSize: 13, color: T.sub }}>Redirecting to home…</div>
               </div>
             )}
@@ -1295,9 +1711,38 @@ export default function App() {
                         color: T.acc,
                       }}
                     >
-                      ✓ Bill scanned — review details below
+                      ✓ AI filled the form — edit anything, then confirm below
                     </div>
                   </div>
+                )}
+
+                {scanLineItems && scanLineItems.length > 0 && (
+                  <details
+                    style={{
+                      ...card2,
+                      marginBottom: 14,
+                      fontSize: 12,
+                      color: T.sub,
+                    }}
+                  >
+                    <summary style={{ cursor: "pointer", fontWeight: 600, color: T.txt }}>
+                      Detected line items ({scanLineItems.length})
+                    </summary>
+                    <ul style={{ margin: "10px 0 0", paddingLeft: 18, lineHeight: 1.5 }}>
+                      {scanLineItems.map((row, i) => {
+                        const name =
+                          (row && typeof row === "object" && (row.name ?? row.item ?? row.description)) || "Item";
+                        const raw = row && typeof row === "object" ? row.amount ?? row.price ?? row.total : "";
+                        const a = raw !== "" && raw != null ? parseFloat(String(raw).replace(/[^\d.-]/g, "")) : NaN;
+                        return (
+                          <li key={i}>
+                            {String(name)}
+                            {Number.isFinite(a) ? ` — ${formatMoney(a)}` : ""}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </details>
                 )}
 
                 {scanErr && (
@@ -1339,7 +1784,7 @@ export default function App() {
                   <label style={lbl}>
                     Category <span style={{ color: T.dng }}>*</span>
                   </label>
-                  <div style={{ fontSize: 11, color: T.dng, marginBottom: 10, lineHeight: 1.35 }}>Required — pick one category.</div>
+                  <div style={{ fontSize: 11, color: T.sub, marginBottom: 10, lineHeight: 1.35 }}>Tap a chip to choose (required before save).</div>
                   {fbStatus === "loading" && categories.length === 0 && (
                     <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Loading catalog…</div>
                   )}
@@ -1580,6 +2025,8 @@ export default function App() {
                       <RefreshCw size={18} className="spin" />
                       Saving…
                     </>
+                  ) : previewImg ? (
+                    "Confirm & save expense"
                   ) : (
                     "Add Expense"
                   )}

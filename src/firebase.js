@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getFirestore, initializeFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 function readFirebaseConfig() {
   const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDgCn-WcO0T69Kcky3A32WS_dQ3YapmXDY";
@@ -38,6 +39,7 @@ function createFirestore() {
 
 export const db = createFirestore();
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 let analyticsInit = null;
 

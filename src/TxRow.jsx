@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MoreVertical, Trash2 } from "lucide-react";
+import { MoreVertical, Trash2, ImageIcon } from "lucide-react";
 import { T } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 
@@ -15,6 +15,7 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
         padding: "11px 0",
         borderBottom: `1px solid ${T.bdr}`,
         position: "relative",
+        overflow: "visible",
       }}
     >
       <div
@@ -28,9 +29,32 @@ export function TxRow({ tx, onDelete, categories, formatMoney, dateLocale }) {
           justifyContent: "center",
           fontSize: 20,
           flexShrink: 0,
+          position: "relative",
+          overflow: "visible",
         }}
       >
         {cat.e}
+        {tx.receiptUrl ? (
+          <span
+            title="Receipt attached"
+            style={{
+              position: "absolute",
+              bottom: 0,
+              right: 0,
+              width: 17,
+              height: 17,
+              borderRadius: 5,
+              background: T.surf,
+              border: `1px solid ${T.bdr}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+            }}
+          >
+            <ImageIcon size={10} color={T.acc} strokeWidth={2.5} />
+          </span>
+        ) : null}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div

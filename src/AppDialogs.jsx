@@ -89,7 +89,7 @@ const COLORS = {
 function ToastStack({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 8000, display: "flex", flexDirection: "column", alignItems: "center", padding: "max(env(safe-area-inset-top, 12px), 12px) 16px 0", pointerEvents: "none" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 10500, display: "flex", flexDirection: "column", alignItems: "center", padding: "max(env(safe-area-inset-top, 12px), 12px) 16px 0", pointerEvents: "none" }}>
       {toasts.map((t) => {
         const Icon = ICONS[t.type] || Info;
         const color = (COLORS[t.type] || COLORS.info)();
@@ -157,7 +157,7 @@ function ConfirmOverlay({ title, msg, type, confirmLabel, cancelLabel, danger, o
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 8500,
+        zIndex: 10000,
         background: show ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0)",
         display: "flex",
         alignItems: "center",

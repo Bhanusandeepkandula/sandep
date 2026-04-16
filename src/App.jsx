@@ -5663,7 +5663,32 @@ export default function App({ onReady }) {
                 {(profileName && profileName.trim()[0]) || "?"}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>{profileName.trim() || "—"}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                    {profileName.trim() || "Add your name"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openNameEditor}
+                    aria-label="Edit display name"
+                    title="Edit display name"
+                    style={{
+                      flexShrink: 0,
+                      width: 26, height: 26,
+                      borderRadius: 8,
+                      border: `1px solid ${T.bdr}`,
+                      background: T.card2,
+                      color: T.sub,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </div>
                 {profileEmail.trim() ? <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{profileEmail.trim()}</div> : null}
                 {firebaseUser?.email ? (
                   <div style={{ marginTop: 8 }}>
@@ -5683,50 +5708,6 @@ export default function App({ onReady }) {
                 </button>
               ) : null}
             </div>
-
-            {/* ─── Display Name ─── */}
-            {firebaseUser?.email ? (
-              <div style={{ ...card, marginBottom: 14 }}>
-                <div style={{ fontSize: 12, color: T.sub, marginBottom: 6, fontWeight: 600 }}>Display name</div>
-                <div style={{ fontSize: 11, color: T.mut, lineHeight: 1.45, marginBottom: 10 }}>
-                  The name friends see when you split expenses with them.
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    type="text"
-                    placeholder="e.g. Alex Johnson"
-                    value={profileName}
-                    onChange={(e) => setProfileName(e.target.value)}
-                    style={{ ...inp, flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    disabled={!profileName.trim()}
-                    onClick={async () => {
-                      const name = profileName.trim();
-                      if (!name) { dlg.toast("Name cannot be empty", { type: "warn" }); return; }
-                      if (!uidRef.current) return;
-                      try {
-                        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { profileName: name }, { merge: true });
-                        dlg.toast("Display name updated", { type: "success" });
-                      } catch (err) {
-                        console.error("Failed to save profile name", err);
-                        dlg.toast("Couldn't save — check your connection", { type: "error" });
-                      }
-                    }}
-                    style={{
-                      padding: "0 16px", borderRadius: 10, border: "none",
-                      background: profileName.trim() ? T.acc : T.card2,
-                      color: profileName.trim() ? T.btnTxt : T.mut,
-                      fontSize: 13, fontWeight: 700,
-                      cursor: profileName.trim() ? "pointer" : "not-allowed",
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : null}
 
             {/* ─── Stats Row ─── */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>

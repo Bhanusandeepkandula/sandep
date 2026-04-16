@@ -786,7 +786,10 @@ export function TxDetail({
                                   type: "warn",
                                 }
                               );
-                              if (ok) onClearSettlement(tx.id);
+                              if (ok) {
+                                onClearSettlement(tx.id);
+                                onClose?.();
+                              }
                             }}
                             title="Remove settlement"
                             aria-label="Remove settlement"

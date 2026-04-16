@@ -75,6 +75,24 @@ const THEMES = {
     heroGrad: "linear-gradient(135deg,#FFFFFF 0%,#F4F4F5 100%)",
     r: 14, rLg: 20,
   },
+  /* Crisp light theme with a clean blue accent — the inverse of Midnight.
+   * Neutral off-white surfaces, high-contrast ink text, and a saturated
+   * royal-blue primary so call-to-action buttons, charts and pills still
+   * stand out against the bright background. */
+  lightblue: {
+    id: "lightblue", name: "Light Blue", preview: ["#F6F9FF", "#FFFFFF", "#2563EB"],
+    bg: "#F6F9FF", surf: "#EEF3FC", card: "#FFFFFF", card2: "#F1F5FC",
+    bdr: "#DCE4F3", bdrH: "#BFD0EC",
+    acc: "#2563EB", adim: "rgba(37,99,235,0.10)",
+    warn: "#D97706", wdim: "rgba(217,119,6,0.10)",
+    dng: "#DC2626", ddim: "rgba(220,38,38,0.09)",
+    blue: "#2563EB", bdim: "rgba(37,99,235,0.10)",
+    purp: "#7C3AED", pdim: "rgba(124,58,237,0.10)",
+    txt: "#0F172A", sub: "#475569", mut: "#CBD5E1",
+    btnTxt: "#FFFFFF",
+    heroGrad: "linear-gradient(135deg,#DBEAFE 0%,#EFF6FF 100%)",
+    r: 14, rLg: 20,
+  },
 };
 
 export { THEMES };

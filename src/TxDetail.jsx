@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { X, Trash2, Users, Pencil, Check, ImageIcon, ShoppingBag } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Trash2, Users, Pencil, Check, ImageIcon, ShoppingBag, CheckCircle2 } from "lucide-react";
 import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 import { CategoryIcon } from "./categoryIcons.jsx";
@@ -23,6 +23,8 @@ export function TxDetail({
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
   const [imgOpen, setImgOpen] = useState(false);
+  const [splitSaved, setSplitSaved] = useState(false);
+  const splitTimerRef = useRef(null);
 
   useEffect(() => { setEditing(false); setEditDraft(null); }, [tx?.id]);
 
@@ -96,7 +98,11 @@ export function TxDetail({
       }
     }
     onSaveSplit(tx.id, { type: splitType, people: splitPpl.map((p) => ({ n: p.n, a: typeof p.a === "number" && Number.isFinite(p.a) ? p.a : parseFloat(String(p.a)) || 0 })) });
+    setSplitSaved(true);
+    if (splitTimerRef.current) clearTimeout(splitTimerRef.current);
+    splitTimerRef.current = setTimeout(() => setSplitSaved(false), 2500);
   }
+  useEffect(() => () => { if (splitTimerRef.current) clearTimeout(splitTimerRef.current); }, []);
   function handleDelete() { onDelete(tx.id); onClose(); }
 
   const sectionCard = { background: T.card, borderRadius: 14, border: `1px solid ${T.bdr}`, padding: 14, marginBottom: 10 };
@@ -199,14 +205,27 @@ export function TxDetail({
                     </div>
                   </div>
                 )}
-                {tx.split?.people?.length > 0 && !canEditSplit && (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0" }}>
-                    <span style={{ fontSize: 13, color: T.sub }}>Split</span>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                      {tx.split.people.map((p, i) => <span key={i} style={{ fontSize: 12 }}>{p.n} · {formatMoney(p.a)}</span>)}
+                {tx.split?.people?.length > 0 && (() => {
+                  const pplSum = tx.split.people.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0);
+                  const yourShare = txAmt - pplSum;
+                  return (
+                    <div style={{ padding: "10px 0" }}>
+                      <div style={{ fontSize: 13, color: T.sub, marginBottom: 8 }}>Split</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><Users size={11} color={T.acc} /> You</span>
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(yourShare)}</span>
+                        </div>
+                        {tx.split.people.map((p, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}><Users size={11} color={T.sub} /> {p.n}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(p.a)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
 
@@ -323,10 +342,36 @@ export function TxDetail({
                               <div style={{ fontSize: 11, color: T.mut, marginTop: 4 }}>Total must equal {formatMoney(txAmt)}</div>
                             </div>
                           )}
-                          <button type="button" onClick={handleSaveSplit} disabled={splitPpl.length === 0}
-                            style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: splitPpl.length === 0 ? T.mut : T.acc, color: splitPpl.length === 0 ? T.sub : T.btnTxt, fontWeight: 800, fontSize: 14, cursor: splitPpl.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                            <Check size={16} /> Save Split
+                          <button type="button" onClick={handleSaveSplit} disabled={splitPpl.length === 0 || splitSaved}
+                            style={{
+                              width: "100%", padding: 12, borderRadius: 10, border: "none",
+                              background: splitSaved ? T.adim : splitPpl.length === 0 ? T.mut : T.acc,
+                              color: splitSaved ? T.acc : splitPpl.length === 0 ? T.sub : T.btnTxt,
+                              fontWeight: 800, fontSize: 14,
+                              cursor: splitPpl.length === 0 || splitSaved ? "not-allowed" : "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                              transition: "all .25s ease",
+                            }}>
+                            {splitSaved ? <><CheckCircle2 size={16} /> Saved!</> : <><Check size={16} /> Save Split</>}
                           </button>
+
+                          {splitSaved && splitPpl.length > 0 && (
+                            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: T.adim, border: `1px solid ${T.acc}33` }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: T.acc, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Split Summary</div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                                  <span style={{ color: T.sub }}>You</span>
+                                  <span style={{ fontWeight: 700 }}>{formatMoney(txAmt - splitPpl.reduce((s, p) => s + (parseFloat(String(p.a)) || 0), 0))}</span>
+                                </div>
+                                {splitPpl.map((p, i) => (
+                                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                                    <span style={{ color: T.sub }}>{p.n}</span>
+                                    <span style={{ fontWeight: 700 }}>{formatMoney(parseFloat(String(p.a)) || 0)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </>
                       )}
                     </>

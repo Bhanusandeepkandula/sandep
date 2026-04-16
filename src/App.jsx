@@ -1251,7 +1251,11 @@ export default function App() {
                 "For transaction_list, output every expense row you can read in \"transactions\"; never stop at the first row. " +
                 "For single_receipt, totals must reflect money spent (purchases), not bank credits or deposits. " +
                 "Include \"missing_fields\" only on single_receipt when fields are unreadable (total, date, category, payment, notes, line_items). " +
-                "Mark is_credit_or_income true for incoming money so the app can skip it as an expense.",
+                "Mark is_credit_or_income true for incoming money so the app can skip it as an expense. " +
+                `DATE YEAR RULE: Today is ${new Date().toISOString().split("T")[0]}. ` +
+                `For any date that lacks a year, use ${new Date().getFullYear()} as the year. ` +
+                `If the month is > ${new Date().getMonth() + 1} (current month), use ${new Date().getFullYear() - 1} instead (those months haven't happened yet). ` +
+                "NEVER output future dates. NEVER guess years like 2023 or 2024 — only use the current or previous year as described.",
             },
             { role: "user", content: userContent },
           ],

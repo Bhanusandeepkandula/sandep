@@ -1,6 +1,22 @@
 import { matchCatalogName, parseAmount, parseDateToISO } from "./importParse.js";
 
 /**
+ * Force-correct year on a YYYY-MM-DD string:
+ * months <= current month → current year, months > current month → previous year.
+ */
+function forceCorrectDateYear(dateIso) {
+  if (!dateIso || typeof dateIso !== "string") return dateIso;
+  const m = dateIso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateIso;
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+  const month = Number(m[2]);
+  const year = month > curMonth ? curYear - 1 : curYear;
+  return `${year}-${m[2]}-${m[3]}`;
+}
+
+/**
  * Pull JSON from model output (handles markdown fences and extra prose).
  * @param {string} text
  */
@@ -130,7 +146,7 @@ export function normalizeScanResult(raw, ctx) {
   if (dateMissing) {
     date = "";
   } else if (typeof rawObj.date === "string" && rawObj.date.trim()) {
-    date = rawObj.date.trim();
+    date = forceCorrectDateYear(rawObj.date.trim()) || rawObj.date.trim();
   } else {
     date = defaultDate;
   }
@@ -197,7 +213,7 @@ export function buildImportRowsFromVisionTransactions(txs, ctx) {
         : parseAmount(String(amtRaw));
 
     const dateStr = typeof o.date === "string" ? o.date.trim() : "";
-    const dateIso = dateStr ? parseDateToISO(dateStr) : null;
+    const dateIso = dateStr ? forceCorrectDateYear(parseDateToISO(dateStr)) : null;
 
     const notes = String(o.notes ?? o.merchant ?? o.description ?? o.payee ?? "").trim();
 

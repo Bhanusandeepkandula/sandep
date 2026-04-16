@@ -13,19 +13,27 @@ const HEADER_LINE = "date,amount,category,payment,notes,tags";
 const OCR_JSON_MAX_CHARS = 24_000;
 
 /**
- * Force-replace the year portion of every YYYY-MM-DD date in CSV data rows
- * with `correctYear`. Skips the header row. This is the ultimate safeguard
- * against the model hallucinating a wrong year when the source has no year.
+ * Force-correct the year on every YYYY-MM-DD date in CSV data rows.
+ * - Months <= current month → current year
+ * - Months >  current month → previous year (they haven't happened yet,
+ *   so they must belong to the prior year — e.g. Dec when it's Apr 2026 → Dec 2025)
+ * This also prevents future expenses and handles year-boundary screenshots
+ * (Jan at top, Dec at bottom = two different years).
  */
 function forceCorrectYearInCsv(csv, correctYear) {
-  if (!correctYear || !csv) return csv;
-  const yr = String(correctYear);
-  if (!/^\d{4}$/.test(yr)) return csv;
+  if (!csv) return csv;
+  const now = new Date();
+  const yr = Number(correctYear) || now.getFullYear();
+  const curMonth = now.getMonth() + 1; // 1-12
   const lines = csv.split("\n");
   return lines
     .map((line, i) => {
       if (i === 0) return line; // header
-      return line.replace(/\b\d{4}(-\d{2}-\d{2})\b/, `${yr}$1`);
+      return line.replace(/\b\d{4}-(\d{2})-(\d{2})\b/, (_match, mm, dd) => {
+        const m = Number(mm);
+        const assignedYear = m > curMonth ? yr - 1 : yr;
+        return `${assignedYear}-${mm}-${dd}`;
+      });
     })
     .join("\n");
 }
@@ -40,16 +48,20 @@ function forceCorrectYearInCsv(csv, correctYear) {
  * @returns {string} prepended to user messages (empty if no context)
  */
 function buildDateContextBlock(ctx) {
-  const fallbackYear = String(new Date().getFullYear());
+  const now = new Date();
+  const fallbackYear = String(now.getFullYear());
+  const curMonth = now.getMonth() + 1;
   const y = (ctx && typeof ctx === "object" && ctx.year && String(ctx.year).trim()) || fallbackYear;
+  const prevY = Number(y) - 1;
   const m = ctx && typeof ctx === "object" && ctx.month ? String(ctx.month).trim() : "";
   const lines = [
     "=== MANDATORY DATE RULES (override everything else about year) ===",
-    `YEAR: Any date in the source that does NOT include a 4-digit year MUST use year ${y}. Do NOT guess any other year. This is NOT optional.`,
+    `YEAR: Default year is ${y}. Use ${y} for every date UNLESS the month number is > ${curMonth} (current month), in which case use ${prevY} for that row. This handles year-boundary lists (e.g. Jan at top, Dec at bottom = Jan ${y}, Dec ${prevY}). Do NOT guess any other year. NO future dates allowed.`,
     m
       ? `MONTH FALLBACK: When the source shows only a day number (no month visible), assume month ${m} (01–12) unless the text clearly shows another month.`
       : "",
     "DAY FALLBACK: If the source shows only MONTH + YEAR (no day), use day 01 (YYYY-MM-01).",
+    "NO FUTURE DATES: Never output a date that is in the future relative to today.",
     "If a date cannot be determined at all, add a short follow_up_question asking the user — do not silently pick a random date.",
     "=== End date rules ===",
     "",

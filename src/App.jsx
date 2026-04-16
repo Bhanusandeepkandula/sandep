@@ -226,6 +226,8 @@ export default function App() {
   /** Parsed CSV ready to confirm (one file per import). */
   const [importBundle, setImportBundle] = useState(null);
   const [importSaving, setImportSaving] = useState(false);
+  const [editingImportIdx, setEditingImportIdx] = useState(null);
+  const [editImportDraft, setEditImportDraft] = useState(null);
   /** When set, success screen shows bulk-import copy. */
   const [bulkSuccess, setBulkSuccess] = useState(null);
 
@@ -1552,6 +1554,53 @@ export default function App() {
     } finally {
       setImportSaving(false);
     }
+  }
+
+  function startEditImportRow(idx) {
+    const r = importBundle?.rows?.[idx];
+    if (!r) return;
+    setEditingImportIdx(idx);
+    setEditImportDraft({
+      amount: r.amount > 0 ? String(r.amount) : "",
+      date: r.date || "",
+      category: r.category || "",
+      payment: r.payment || "",
+      notes: r.notes || "",
+    });
+  }
+
+  function saveEditImportRow() {
+    if (editingImportIdx == null || !editImportDraft || !importBundle) return;
+    const cats = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
+    const pays = (catalogRef.current.payments || []).filter(Boolean);
+    const amt = parseFloat(editImportDraft.amount);
+    const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(editImportDraft.date);
+    const catMatch = cats.find((c) => c === editImportDraft.category) || "";
+    const payMatch = pays.find((p) => p === editImportDraft.payment) || pays[0] || "";
+    let error = "";
+    if (!Number.isFinite(amt) || amt <= 0) error = "Invalid amount";
+    else if (!dateOk) error = "Invalid date (YYYY-MM-DD)";
+    else if (!catMatch) error = `Unknown category "${editImportDraft.category}"`;
+
+    const updated = [...importBundle.rows];
+    updated[editingImportIdx] = {
+      ...updated[editingImportIdx],
+      amount: Number.isFinite(amt) ? amt : 0,
+      date: editImportDraft.date,
+      category: catMatch,
+      payment: payMatch,
+      notes: editImportDraft.notes,
+      ok: !error,
+      error: error || undefined,
+    };
+    setImportBundle({ ...importBundle, rows: updated });
+    setEditingImportIdx(null);
+    setEditImportDraft(null);
+  }
+
+  function cancelEditImportRow() {
+    setEditingImportIdx(null);
+    setEditImportDraft(null);
   }
 
   async function genTips() {
@@ -2970,32 +3019,112 @@ export default function App() {
                         <th style={{ textAlign: "left", padding: "8px 6px", color: T.sub }}>Status</th>
                         <th style={{ textAlign: "right", padding: "8px 6px", color: T.sub }}>Amount</th>
                         <th style={{ textAlign: "left", padding: "8px 6px", color: T.sub }}>Date</th>
-                        <th style={{ textAlign: "left", padding: "8px 10px", color: T.sub }}>Category</th>
+                        <th style={{ textAlign: "left", padding: "8px 6px", color: T.sub }}>Category</th>
+                        <th style={{ textAlign: "center", padding: "8px 10px", color: T.sub }}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {importBundle.rows.map((r) => (
-                        <tr key={r.line} style={{ borderTop: `1px solid ${T.bdr}` }}>
-                          <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
-                          <td
-                            title={!r.ok && r.error ? r.error : undefined}
-                            style={{
-                              padding: "8px 6px",
-                              color: r.ok ? T.acc : T.dng,
-                              maxWidth: 130,
-                              fontSize: r.ok ? 12 : 11,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {r.ok ? "✓" : r.error}
-                          </td>
-                          <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 600 }}>{r.ok ? formatMoney(r.amount) : "—"}</td>
-                          <td style={{ padding: "8px 6px", color: T.sub }}>{r.date}</td>
-                          <td style={{ padding: "8px 10px" }}>{r.category || "—"}</td>
-                        </tr>
-                      ))}
+                      {importBundle.rows.map((r, idx) => {
+                        const isEditing = editingImportIdx === idx;
+                        if (isEditing && editImportDraft) {
+                          const cats = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
+                          const pays = (catalogRef.current.payments || []).filter(Boolean);
+                          const cellInput = { background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 4, color: T.txt, padding: "4px 6px", fontSize: 12, width: "100%" };
+                          return (
+                            <tr key={r.line} style={{ borderTop: `1px solid ${T.acc}`, background: "rgba(0,255,100,0.04)" }}>
+                              <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
+                              <td style={{ padding: "6px" }} colSpan={1}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={editImportDraft.amount}
+                                  onChange={(e) => setEditImportDraft((d) => ({ ...d, amount: e.target.value }))}
+                                  style={{ ...cellInput, width: 70, textAlign: "right" }}
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td style={{ padding: "6px" }}>
+                                <input
+                                  type="date"
+                                  value={editImportDraft.date}
+                                  onChange={(e) => setEditImportDraft((d) => ({ ...d, date: e.target.value }))}
+                                  style={{ ...cellInput, width: 120 }}
+                                />
+                              </td>
+                              <td style={{ padding: "6px" }}>
+                                <select
+                                  value={editImportDraft.category}
+                                  onChange={(e) => setEditImportDraft((d) => ({ ...d, category: e.target.value }))}
+                                  style={{ ...cellInput, width: 100 }}
+                                >
+                                  <option value="">—</option>
+                                  {cats.map((c) => (
+                                    <option key={c} value={c}>{c}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td style={{ padding: "6px" }}>
+                                <select
+                                  value={editImportDraft.payment}
+                                  onChange={(e) => setEditImportDraft((d) => ({ ...d, payment: e.target.value }))}
+                                  style={{ ...cellInput, width: 80 }}
+                                >
+                                  {pays.map((p) => (
+                                    <option key={p} value={p}>{p}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td style={{ padding: "6px", whiteSpace: "nowrap", textAlign: "center" }}>
+                                <button
+                                  type="button"
+                                  onClick={saveEditImportRow}
+                                  style={{ background: T.acc, color: "#000", border: "none", borderRadius: 4, padding: "4px 8px", fontWeight: 700, fontSize: 11, cursor: "pointer", marginRight: 4 }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditImportRow}
+                                  style={{ background: "transparent", color: T.sub, border: `1px solid ${T.bdr}`, borderRadius: 4, padding: "4px 8px", fontSize: 11, cursor: "pointer" }}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return (
+                          <tr key={r.line} style={{ borderTop: `1px solid ${T.bdr}` }}>
+                            <td style={{ padding: "8px 10px", color: T.mut }}>{r.line}</td>
+                            <td
+                              title={!r.ok && r.error ? r.error : undefined}
+                              style={{
+                                padding: "8px 6px",
+                                color: r.ok ? T.acc : T.dng,
+                                maxWidth: 130,
+                                fontSize: r.ok ? 12 : 11,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {r.ok ? "✓" : r.error}
+                            </td>
+                            <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 600 }}>{r.ok ? formatMoney(r.amount) : "—"}</td>
+                            <td style={{ padding: "8px 6px", color: T.sub }}>{r.date}</td>
+                            <td style={{ padding: "8px 6px" }}>{r.category || "—"}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                              <button
+                                type="button"
+                                onClick={() => startEditImportRow(idx)}
+                                style={{ background: "transparent", color: T.blue, border: "none", cursor: "pointer", fontSize: 12, padding: "2px 6px", textDecoration: "underline" }}
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

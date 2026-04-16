@@ -46,6 +46,164 @@ function resolveAnthropicApiKey(mode, cwd) {
   ).trim();
 }
 
+function resolveOpenAiApiKey(mode, cwd) {
+  const loaded = loadEnv(mode, cwd, ["OPENAI_", "VITE_OPENAI_"]);
+  const fromLoadEnv = String(loaded.OPENAI_API_KEY || loaded.VITE_OPENAI_API_KEY || "").trim();
+  if (fromLoadEnv) return fromLoadEnv;
+  const fromFile =
+    parseEnvFileForKey(cwd, ".env.local", "OPENAI_API_KEY") ||
+    parseEnvFileForKey(cwd, ".env.local", "VITE_OPENAI_API_KEY") ||
+    parseEnvFileForKey(cwd, ".env", "OPENAI_API_KEY") ||
+    parseEnvFileForKey(cwd, ".env", "VITE_OPENAI_API_KEY");
+  if (fromFile) return fromFile;
+  return String(process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || "").trim();
+}
+
+/** Read JSON POST body (dev / preview only). */
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      try {
+        const s = Buffer.concat(chunks).toString("utf8");
+        resolve(s ? JSON.parse(s) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function openAiOcrToCsv(apiKey, ocrText) {
+  const system = `You convert noisy OCR receipt or restaurant bill text into a strict CSV for expense import.
+
+Output ONLY raw CSV text. No markdown fences, no commentary before or after.
+
+The first line MUST be exactly:
+amount,date,category,payment_method,notes,tags
+
+Column rules:
+- amount: decimal number only (no Rs, ₹, currency symbols, no commas in the number)
+- date: YYYY-MM-DD for the receipt; if the receipt has no date, use a reasonable guess from context or today's date in the same format for all rows from one receipt
+- category: MUST be exactly one of: Food, Travel, Rent, Shopping, Bills, Entertainment, Health, Education, Subscriptions, Groceries, Transport, Investments, Others
+- payment_method: one of Cash, Credit Card, Debit Card, UPI, Net Banking, Wallet — if unknown use Debit Card
+- notes: clean line-item name in Title Case, single line; merge broken OCR lines for one item into one phrase (e.g. "Grilled And Sauteed Vegetables")
+- tags: optional lowercase tag or empty (trailing comma allowed)
+
+Data rules:
+- Emit ONE data row per purchased line item (dishes, drinks, packaged goods the customer bought). Do NOT emit rows for: Grand Total, Subtotal, Total, Tax, GST, SGST, CGST, Service Charge, Packing Charge, Discount lines that are not a product, header/footer text, address, phone, GSTIN.
+- Ignore duplicate repeated lines.
+- Fix obvious OCR typos in notes.
+- If there are no line items, output the header row only.`;
+
+  const user = `OCR text:\n\n${ocrText.slice(0, 120000)}`;
+
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = j.error?.message || JSON.stringify(j).slice(0, 200) || r.statusText;
+    throw new Error(msg);
+  }
+  let text = String(j.choices?.[0]?.message?.content || "").trim();
+  text = text.replace(/^```(?:csv)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  if (!text.toLowerCase().startsWith("amount,date,category")) {
+    const m = text.match(/amount,date,category[^\n]*\n[\s\S]*/i);
+    if (m) text = m[0].trim();
+  }
+  return text;
+}
+
+function ocrCsvApiPlugin(mode, cwd) {
+  let warnedMissingOpenAi = false;
+  return {
+    name: "ocr-csv-api",
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const path = (req.url || "").split("?")[0];
+        if (!path.endsWith("/api/convert") || req.method !== "POST") return next();
+        try {
+          const body = await readJsonBody(req);
+          const ocrText = String(body.ocrText || "").trim();
+          if (!ocrText) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "ocrText is required" }));
+            return;
+          }
+          const key = resolveOpenAiApiKey(mode, cwd);
+          if (!key) {
+            if (!warnedMissingOpenAi) {
+              warnedMissingOpenAi = true;
+              console.warn(
+                "\n[vite] OPENAI_API_KEY is missing. OCR → CSV needs it in .env.local (never commit keys). Restart dev after adding.\n"
+              );
+            }
+            res.statusCode = 503;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "OPENAI_API_KEY missing in .env.local" }));
+            return;
+          }
+          const csv = await openAiOcrToCsv(key, ocrText);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ csv }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: e?.message || String(e) }));
+        }
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const path = (req.url || "").split("?")[0];
+        if (!path.endsWith("/api/convert") || req.method !== "POST") return next();
+        try {
+          const body = await readJsonBody(req);
+          const ocrText = String(body.ocrText || "").trim();
+          if (!ocrText) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "ocrText is required" }));
+            return;
+          }
+          const key = resolveOpenAiApiKey(mode, cwd);
+          if (!key) {
+            res.statusCode = 503;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "OPENAI_API_KEY missing in .env.local" }));
+            return;
+          }
+          const csv = await openAiOcrToCsv(key, ocrText);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ csv }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: e?.message || String(e) }));
+        }
+      });
+    },
+  };
+}
+
 /** Copy dist/index.html → dist/404.html so GitHub Pages serves the SPA on unknown paths (refresh/deep links). */
 function ghPages404Plugin() {
   return {
@@ -99,7 +257,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
-    plugins: [react(), ghPages404Plugin()],
+    plugins: [react(), ghPages404Plugin(), ocrCsvApiPlugin(mode, cwd)],
     server: {
       proxy: {
         "/anthropic": proxyAnthropic,

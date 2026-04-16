@@ -49,6 +49,7 @@ import {
 import { parseExpenseCsv } from "./importParse.js";
 import { extractExpenseJson, normalizeScanResult } from "./scanAi.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
+import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 
 const API = `${import.meta.env.BASE_URL}anthropic/v1/messages`;
 
@@ -95,11 +96,20 @@ export default function App() {
   const fileRef = useRef();
   const stmtRef = useRef();
   const csvRef = useRef();
+  const ocrCsvImgRef = useRef();
   const mainScrollRef = useRef(null);
+  /** Paste OCR / bill text → OpenAI → import-ready CSV (dev: Vite /api/convert). */
+  const [ocrCsvText, setOcrCsvText] = useState("");
+  const [ocrCsvOut, setOcrCsvOut] = useState("");
+  const [ocrCsvBusy, setOcrCsvBusy] = useState(false);
+  const [ocrCsvTessBusy, setOcrCsvTessBusy] = useState(false);
+  const [ocrCsvErr, setOcrCsvErr] = useState("");
   /** User cancelled mid-scan or navigated away from processing. */
   const scanCancelledRef = useRef(false);
   /** Abort in-flight Anthropic request when user cancels. */
   const scanFetchAbortRef = useRef(null);
+  /** Phase order for current scan: includes `ocr` when Tesseract runs on this file. */
+  const scanPhaseOrderRef = useRef(["read", "ai", "parse"]);
   /** Parsed CSV ready to confirm (one file per import). */
   const [importBundle, setImportBundle] = useState(null);
   const [importSaving, setImportSaving] = useState(false);
@@ -650,6 +660,12 @@ export default function App() {
     const input = e.target;
     const f = input.files?.[0];
     if (!f) return;
+    const lowerEarly = f.name?.toLowerCase() || "";
+    const mtEarly =
+      f.type && f.type.length > 0 ? f.type : lowerEarly.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+    scanPhaseOrderRef.current = canRunBrowserOcr(mtEarly, isStatement)
+      ? ["read", "ocr", "ai", "parse"]
+      : ["read", "ai", "parse"];
     scanCancelledRef.current = false;
     scanFetchAbortRef.current?.abort();
     scanFetchAbortRef.current = new AbortController();
@@ -684,6 +700,20 @@ export default function App() {
         }
         const b64 = raw.split(",")[1];
         if (!isStatement) setPreviewImg(raw);
+
+        let ocrSnippet = "";
+        if (scanPhaseOrderRef.current.includes("ocr")) {
+          setScanPhase("ocr");
+          if (!scanCancelledRef.current) {
+            try {
+              ocrSnippet = await extractReceiptTextWithOcr(raw);
+            } catch (ocrErr) {
+              console.warn("Tesseract OCR failed", ocrErr);
+            }
+          }
+        }
+        if (scanCancelledRef.current) return;
+
         setScanPhase("ai");
 
         const cats = catalogRef.current.categories || [];
@@ -731,7 +761,11 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                   },
                   {
                     type: "text",
-                    text: `Analyze this ${isStatement ? "bank or card statement" : "receipt or bill image"} and return only the JSON object.`,
+                    text: `${
+                      ocrSnippet
+                        ? `Raw text from on-device Tesseract OCR (same engine as desktop tools like Textemage; line breaks may be wrong — use the image as source of truth):\n${ocrSnippet}\n\n`
+                        : ""
+                    }Analyze this ${isStatement ? "bank or card statement" : "receipt or bill image"} and return only the JSON object.`,
                   },
                 ],
               },
@@ -848,6 +882,104 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
       setStep("importPreview");
     };
     reader.readAsText(f);
+  }
+
+  function ocrCsvApiUrl() {
+    const b = import.meta.env.BASE_URL || "/";
+    return (b.endsWith("/") ? b : `${b}/`) + "api/convert";
+  }
+
+  async function convertOcrTextToCsv() {
+    setOcrCsvErr("");
+    if (!ocrCsvText.trim()) {
+      setOcrCsvErr("Paste OCR text or run OCR on an image first.");
+      return;
+    }
+    setOcrCsvBusy(true);
+    try {
+      const r = await fetch(ocrCsvApiUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ocrText: ocrCsvText }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setOcrCsvOut("");
+        setOcrCsvErr(typeof data.error === "string" ? data.error : `Request failed (${r.status})`);
+        return;
+      }
+      if (typeof data.csv === "string") {
+        setOcrCsvOut(data.csv);
+      } else {
+        setOcrCsvErr("Unexpected response from server.");
+      }
+    } catch (e) {
+      console.error(e);
+      setOcrCsvErr(e instanceof Error ? e.message : "Network error — use npm run dev with OPENAI_API_KEY.");
+    } finally {
+      setOcrCsvBusy(false);
+    }
+  }
+
+  async function fillOcrFromImageFile(e) {
+    const input = e.target;
+    const f = input.files?.[0];
+    if (!f) return;
+    setOcrCsvErr("");
+    setOcrCsvTessBusy(true);
+    try {
+      const raw = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(f);
+      });
+      if (typeof raw !== "string") return;
+      const text = await extractReceiptTextWithOcr(raw);
+      setOcrCsvText((prev) => {
+        const p = prev.trim();
+        return p ? `${p}\n\n${text}` : text;
+      });
+    } catch (err) {
+      console.error(err);
+      setOcrCsvErr("Could not read text from this image (try JPEG/PNG).");
+    } finally {
+      try {
+        input.value = "";
+      } catch {
+        /* ignore */
+      }
+      setOcrCsvTessBusy(false);
+    }
+  }
+
+  function downloadOcrCsvResult() {
+    if (!ocrCsvOut.trim()) return;
+    const blob = new Blob([ocrCsvOut], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "expense-from-ocr.csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  function applyOcrCsvToImportPreview() {
+    setOcrCsvErr("");
+    const catNames = (catalogRef.current.categories || []).map((c) => c.n).filter(Boolean);
+    const payNames = (catalogRef.current.payments || []).filter(Boolean);
+    const { rows, fatal } = parseExpenseCsv(ocrCsvOut, { categories: catNames, payments: payNames });
+    if (fatal) {
+      setOcrCsvErr(fatal);
+      return;
+    }
+    const okCount = rows.filter((r) => r.ok).length;
+    if (okCount === 0) {
+      setOcrCsvErr("No valid rows in CSV — fix categories or amounts.");
+      return;
+    }
+    setImportBundle({ fileName: "from-ocr.csv", rows });
+    setAddMode("import");
+    setStep("importPreview");
   }
 
   function finishBulkImportSuccess(count, totalAmount) {
@@ -1409,7 +1541,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
         {tab === "add" && (
           <div>
             <div style={{ padding: `${px + 8}px ${px}px`, display: "flex", alignItems: "center", gap: 12 }}>
-              {(step === "form" || step === "importPreview" || step === "processing") && (
+              {(step === "form" || step === "importPreview" || step === "processing" || step === "ocrCsv") && (
                 <button
                   type="button"
                   aria-label={step === "processing" ? "Cancel scan" : "Back"}
@@ -1424,6 +1556,9 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                     setPreviewImg(null);
                     setScanLineItems(null);
                     setScanPhase(null);
+                    setOcrCsvText("");
+                    setOcrCsvOut("");
+                    setOcrCsvErr("");
                   }}
                   style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4, minWidth: 44, minHeight: 44 }}
                 >
@@ -1438,7 +1573,9 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                     : step === "importPreview"
                       ? "Review import"
                       : step === "processing"
-                        ? "Scanning…"
+                      ? "Scanning…"
+                      : step === "ocrCsv"
+                        ? "OCR → CSV"
                         : step === "success"
                           ? "Saved!"
                           : "Add Expense"}
@@ -1457,6 +1594,13 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                     sub: "One .csv file — category names must match your app",
                     col: T.warn,
                   },
+                  {
+                    mode: "ocrCsv",
+                    icon: "🧾",
+                    title: "OCR → CSV",
+                    sub: "Paste bill text or OCR an image; OpenAI builds import CSV (dev server)",
+                    col: T.purp,
+                  },
                   { mode: "image", icon: "📷", title: "Scan Receipt / Bill", sub: "AI extracts details from photo", col: T.blue },
                   { mode: "statement", icon: "📄", title: "Upload Statement", sub: "Bank or credit card PDF", col: T.purp },
                 ].map((opt) => (
@@ -1468,7 +1612,10 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                       setAddMode(opt.mode);
                       if (opt.mode === "manual") setStep("form");
                       else if (opt.mode === "import") csvRef.current?.click();
-                      else if (opt.mode === "image") fileRef.current?.click();
+                      else if (opt.mode === "ocrCsv") {
+                        setOcrCsvErr("");
+                        setStep("ocrCsv");
+                      } else if (opt.mode === "image") fileRef.current?.click();
                       else stmtRef.current?.click();
                     }}
                     onKeyDown={(e) => {
@@ -1476,7 +1623,10 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                         setAddMode(opt.mode);
                         if (opt.mode === "manual") setStep("form");
                         else if (opt.mode === "import") csvRef.current?.click();
-                        else if (opt.mode === "image") fileRef.current?.click();
+                        else if (opt.mode === "ocrCsv") {
+                          setOcrCsvErr("");
+                          setStep("ocrCsv");
+                        } else if (opt.mode === "image") fileRef.current?.click();
                         else stmtRef.current?.click();
                       }
                     }}
@@ -1508,6 +1658,155 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                   style={{ display: "none" }}
                   onChange={(e) => processCsvFile(e)}
                 />
+                <input
+                  ref={ocrCsvImgRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => void fillOcrFromImageFile(e)}
+                />
+              </div>
+            )}
+
+            {step === "ocrCsv" && (
+              <div
+                style={{
+                  padding: `0 ${px}px`,
+                  paddingBottom: `max(28px, calc(16px + env(safe-area-inset-bottom, 0px)))`,
+                  maxWidth: "100%",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div style={{ fontSize: 13, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
+                  Paste raw OCR text, or add text from a receipt photo (Tesseract in the browser). Then convert with OpenAI — key stays on the server in{" "}
+                  <code style={{ color: T.sub }}>npm run dev</code> only (<code style={{ fontSize: 11 }}>OPENAI_API_KEY</code> in <code style={{ fontSize: 11 }}>.env.local</code>
+                  ). Static deploys need your own API.
+                </div>
+                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    disabled={ocrCsvTessBusy}
+                    onClick={() => ocrCsvImgRef.current?.click()}
+                    style={{
+                      ...inp,
+                      flex: 1,
+                      minWidth: 140,
+                      minHeight: 48,
+                      cursor: ocrCsvTessBusy ? "not-allowed" : "pointer",
+                      fontWeight: 600,
+                      background: T.card2,
+                    }}
+                  >
+                    {ocrCsvTessBusy ? "Reading image…" : "Add text from image"}
+                  </button>
+                </div>
+                <label style={lbl}>OCR / bill text</label>
+                <textarea
+                  value={ocrCsvText}
+                  onChange={(e) => setOcrCsvText(e.target.value)}
+                  placeholder="Paste receipt text here…"
+                  rows={8}
+                  style={{
+                    ...inp,
+                    width: "100%",
+                    resize: "vertical",
+                    minHeight: 160,
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                    marginBottom: 12,
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={ocrCsvBusy || ocrCsvTessBusy}
+                  onClick={() => void convertOcrTextToCsv()}
+                  style={{
+                    width: "100%",
+                    padding: "14px 16px",
+                    borderRadius: T.rLg,
+                    background: ocrCsvBusy ? T.mut : T.acc,
+                    border: "none",
+                    color: "#000",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    cursor: ocrCsvBusy ? "not-allowed" : "pointer",
+                    marginBottom: 12,
+                    minHeight: 52,
+                  }}
+                >
+                  {ocrCsvBusy ? "Converting…" : "Convert to CSV"}
+                </button>
+                {ocrCsvErr && (
+                  <div
+                    style={{
+                      background: T.ddim,
+                      border: "1px solid rgba(239,68,68,0.35)",
+                      borderRadius: T.r,
+                      padding: "10px 14px",
+                      marginBottom: 12,
+                      fontSize: 13,
+                      color: T.dng,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {ocrCsvErr}
+                  </div>
+                )}
+                {ocrCsvOut ? (
+                  <>
+                    <label style={{ ...lbl, marginTop: 8 }}>Result CSV</label>
+                    <textarea
+                      readOnly
+                      value={ocrCsvOut}
+                      rows={10}
+                      style={{
+                        ...inp,
+                        width: "100%",
+                        fontFamily: "ui-monospace, monospace",
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        marginBottom: 12,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => downloadOcrCsvResult()}
+                        style={{
+                          flex: 1,
+                          minWidth: 120,
+                          padding: "12px 14px",
+                          borderRadius: T.r,
+                          border: `1px solid ${T.bdr}`,
+                          background: T.card2,
+                          color: T.txt,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Download .csv
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyOcrCsvToImportPreview()}
+                        style={{
+                          flex: 1,
+                          minWidth: 120,
+                          padding: "12px 14px",
+                          borderRadius: T.r,
+                          border: "none",
+                          background: T.acc,
+                          color: "#000",
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Preview import
+                      </button>
+                    </div>
+                  </>
+                ) : null}
               </div>
             )}
 
@@ -1634,31 +1933,35 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                   Use ← to cancel. Keep this tab open for best results.
                 </div>
                 <div style={{ textAlign: "left", maxWidth: 320, margin: "0 auto", fontSize: 13 }}>
-                  {[
-                    { id: "read", label: "Reading file from your device" },
-                    { id: "ai", label: "Sending image to AI (Claude)" },
-                    { id: "parse", label: "Parsing total, category & lines" },
-                  ].map((row, i) => {
-                    const order = ["read", "ai", "parse"];
-                    const phase = order.includes(scanPhase) ? scanPhase : "read";
+                  {(scanPhaseOrderRef.current.length
+                    ? scanPhaseOrderRef.current
+                    : ["read", "ai", "parse"]
+                  ).map((id, i, order) => {
+                    const labels = {
+                      read: "Reading file from your device",
+                      ocr: "Extracting text (Tesseract.js OCR)",
+                      ai: "Sending image to AI (Claude)",
+                      parse: "Parsing total, category & lines",
+                    };
+                    const phase = order.includes(scanPhase) ? scanPhase : order[0];
                     const idx = order.indexOf(phase);
                     const done = idx > i;
-                    const active = phase === row.id;
+                    const active = phase === id;
                     return (
                       <div
-                        key={row.id}
+                        key={id}
                         style={{
                           display: "flex",
                           alignItems: "center",
                           gap: 10,
                           padding: "10px 0",
-                          borderBottom: i < 2 ? `1px solid ${T.bdr}` : "none",
+                          borderBottom: i < order.length - 1 ? `1px solid ${T.bdr}` : "none",
                           color: done || active ? T.txt : T.mut,
                           fontWeight: active ? 700 : 500,
                         }}
                       >
                         <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
-                        {row.label}
+                        {labels[id] || id}
                       </div>
                     );
                   })}

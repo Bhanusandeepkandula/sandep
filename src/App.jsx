@@ -363,6 +363,10 @@ export default function App({ onReady }) {
   const [showBM, setShowBM] = useState(false);
   const [budgetSubTab, setBudgetSubTab] = useState("budgets");
   const [reportSubTab, setReportSubTab] = useState("spending");
+  /** Header-level display-name editor (bottom-sheet card). */
+  const [showNameEdit, setShowNameEdit] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [bmCat, setBmCat] = useState("");
   const [bmAmt, setBmAmt] = useState("");
   /** Overall monthly spending cap (optional, no category). Synced as `monthlyBudgetTotal` in Firestore. */
@@ -2609,6 +2613,51 @@ export default function App({ onReady }) {
     }
   }
 
+  /**
+   * Persist the user's display name from any caller (header card or profile
+   * tab). Returns true on success so the caller can close its own UI.
+   */
+  async function persistProfileName(name) {
+    const clean = String(name || "").trim();
+    if (!clean) return false;
+    setProfileName(clean);
+    if (uidRef.current) {
+      try {
+        await setDoc(
+          doc(db, "users", uidRef.current, "settings", "app"),
+          { profileName: clean },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function openNameEditor() {
+    setNameDraft(profileName || "");
+    setShowNameEdit(true);
+  }
+  async function saveNameFromHeader() {
+    if (savingName) return;
+    const ok = await (async () => {
+      setSavingName(true);
+      try {
+        return await persistProfileName(nameDraft);
+      } finally {
+        setSavingName(false);
+      }
+    })();
+    if (ok) {
+      setShowNameEdit(false);
+      notifyOp("Name updated", nameDraft.trim(), { type: "success" });
+    } else {
+      dlg.toast("Enter a name before saving", { type: "warn" });
+    }
+  }
+
   async function saveReportFreq(freq) {
     setReportFreq(freq);
     if (uidRef.current) {
@@ -2791,9 +2840,45 @@ export default function App({ onReady }) {
         {tab === "home" && !(fbStatus === "loading" && txs.length === 0) && (
           <div className="tab-content">
             <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
-                <div style={{ fontSize: comfortable ? 26 : 22, fontWeight: 800, marginTop: 2 }}>My Expenses</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: comfortable ? 26 : 22,
+                      fontWeight: 800,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}
+                    title={profileName || "Add your name"}
+                  >
+                    {profileName.trim() || "Add your name"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openNameEditor}
+                    aria-label="Edit display name"
+                    title="Edit display name"
+                    style={{
+                      flexShrink: 0,
+                      width: 26,
+                      height: 26,
+                      borderRadius: 8,
+                      border: `1px solid ${T.bdr}`,
+                      background: T.card2,
+                      color: T.sub,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </div>
               </div>
               <button
                 type="button"
@@ -5434,6 +5519,133 @@ export default function App({ onReady }) {
           </div>
         )}
       </div>
+
+      {showNameEdit ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="name-edit-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 600,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowNameEdit(false);
+            }
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: maxShell,
+              background: T.card,
+              borderRadius: "20px 20px 0 0",
+              padding: 24,
+              paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div id="name-edit-title" style={{ fontSize: 17, fontWeight: 800 }}>
+                Edit display name
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNameEdit(false)}
+                aria-label="Close"
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 10,
+                  border: `1px solid ${T.bdr}`,
+                  background: T.card2,
+                  color: T.sub,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.5 }}>
+              Shown in the app header and on split bills your friends receive.
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lbl}>Your name</label>
+              <input
+                autoFocus
+                type="text"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && nameDraft.trim() && !savingName) {
+                    e.preventDefault();
+                    void saveNameFromHeader();
+                  }
+                  if (e.key === "Escape") {
+                    setShowNameEdit(false);
+                  }
+                }}
+                placeholder="e.g. Sandeep"
+                maxLength={60}
+                style={{ ...inp, fontSize: 18, fontWeight: 600 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowNameEdit(false)}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: T.r,
+                  border: `1px solid ${T.bdr}`,
+                  background: "transparent",
+                  color: T.sub,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!nameDraft.trim() || savingName}
+                onClick={() => void saveNameFromHeader()}
+                style={{
+                  flex: 2,
+                  padding: 14,
+                  borderRadius: T.r,
+                  background: nameDraft.trim() ? T.acc : T.card2,
+                  border: "none",
+                  color: nameDraft.trim() ? T.btnTxt : T.mut,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: !nameDraft.trim() || savingName ? "not-allowed" : "pointer",
+                  opacity: !nameDraft.trim() ? 0.55 : savingName ? 0.8 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                {savingName ? <RefreshCw size={14} className="spin" /> : <Check size={14} />}
+                {savingName ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showBM ? (
         <div

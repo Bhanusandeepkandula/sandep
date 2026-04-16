@@ -1,5 +1,6 @@
 import { T } from "./config.js";
 import { getCat } from "./utils.js";
+import { CategoryIcon } from "./categoryIcons.jsx";
 
 export function BudgetBar({ cat, limit, spent, categories, formatMoney }) {
   const c = getCat(categories, cat);
@@ -11,7 +12,7 @@ export function BudgetBar({ cat, limit, spent, categories, formatMoney }) {
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 18 }}>{c.e}</span>
+          <CategoryIcon name={cat} size={18} color={c.c} />
           <span style={{ fontSize: 14, fontWeight: 600, color: T.txt }}>{cat}</span>
           {over && (
             <span style={{ fontSize: 11, color: T.dng, background: T.ddim, borderRadius: 6, padding: "1px 8px" }}>Over!</span>

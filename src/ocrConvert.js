@@ -124,42 +124,52 @@ TRAVEL:
 === End merchant intelligence ===
 
 === PAYMENT METHOD INTELLIGENCE (use to pick the best payment) ===
-Detect the payment method from clues in the receipt, OCR text, or screenshot:
+READ THE TEXT CAREFULLY for any card name, bank name, or payment clue. Scan every line.
 
-CREDIT CARD indicators:
-- "Visa", "Mastercard", "MC", "Amex", "American Express", "Discover" on the receipt
-- Card number ending (e.g. "****1234", "x1234", "ending in 1234")
-- "Credit", "CR", "credit card" in the payment line
-- Online purchases (Amazon, subscriptions) are almost always credit card
-- "Purchase" label in a bank app usually means card swipe
+CREDIT CARD — flag as "Credit Card":
+- Card brand names ANYWHERE in text: "Visa", "Mastercard", "MC", "Amex", "American Express", "Discover", "RuPay", "Diners", "JCB"
+- Card number patterns: "****1234", "x1234", "XXXX1234", "ending in 1234", "card ending", "last 4"
+- Words: "Credit", "CR", "credit card", "cc payment", "credit account"
+- Online purchases (Amazon, Flipkart, subscriptions) — almost always credit card
+- "Purchase" label in bank app usually means card swipe
+- Bank names + card hint: "HDFC Credit", "SBI Card", "ICICI Platinum", "Citi Rewards", "Chase Sapphire", "Axis Bank CC"
 
-DEBIT CARD indicators:
-- "Debit", "DB", "debit card", "check card" on receipt or bank statement
-- "POS" (Point of Sale) prefix in bank transaction description
-- Bank app showing from a checking account
-- Grocery/gas station transactions often use debit
+DEBIT CARD — flag as "Debit Card":
+- Words: "Debit", "DB", "debit card", "check card", "ATM card"
+- "POS" (Point of Sale) prefix in bank transaction
+- "Savings A/C", "checking account", "current account" context
+- ATM withdrawal: "ATM", "cash withdrawal"
+- Bank names + debit hint: "SBI Debit", "HDFC Savings", "BOB ATM"
+
+WHEN CARD BRAND FOUND BUT CREDIT vs DEBIT IS UNCLEAR:
+- If text has "Visa" or "Mastercard" but NO "credit" or "debit" keyword nearby, and source looks like a BANK STATEMENT → ask follow_up_question: "Is the [card brand] card ending ****XXXX a credit card or debit card?"
+- If source is a RECEIPT (not bank statement) and card brand is visible → default to "Credit Card"
 
 CASH indicators:
-- "Cash", "CASH TENDERED", "Change due", "CASH PAYMENT" on receipt
-- Exact round amounts with no card number shown
+- "Cash", "CASH TENDERED", "Change due", "CASH PAYMENT", "Paid Cash", "Cash Received"
+- Receipt with no card info at all and round amounts → likely cash
 
-DIGITAL / MOBILE PAYMENT indicators:
-- "Apple Pay", "Google Pay", "Samsung Pay", "Tap to Pay", "Contactless"
-- "PayPal", "Venmo", "Cash App", "Zelle" — use the exact name
-- UPI, GPay, PhonePe (India)
+UPI / DIGITAL PAYMENT:
+- "UPI", "GPay", "Google Pay", "PhonePe", "Paytm", "BHIM", "UPI Ref", "@upi", "@ybl", "@oksbi", "@paytm"
+- "Apple Pay", "Samsung Pay", "Tap to Pay", "Contactless", "NFC"
+- "PayPal", "Venmo", "Cash App", "Zelle" — use exact name
 
-BANK TRANSFER indicators:
-- "ACH", "Wire", "EFT", "Direct Debit", "Auto-pay", "Bank Transfer"
-- Utility bills, rent, mortgage often use bank transfer or auto-pay
+BANK TRANSFER / NET BANKING:
+- "NEFT", "RTGS", "IMPS", "ACH", "Wire", "EFT", "Direct Debit", "Auto-pay", "Bank Transfer", "Net Banking"
+- "Online transfer", "Fund transfer"
 
-CHECK indicators:
-- "Check #", "Cheque", check number visible
+WALLET:
+- "Paytm Wallet", "Amazon Pay", "MobiKwik", "Freecharge", "Wallet balance"
+
+CHECK:
+- "Check #", "Cheque", "Chq No"
 
 RULES:
-- Match the detected payment type to the CLOSEST entry in the user's Payments list (exact spelling).
-- If the receipt shows a card ending (e.g. "Visa ****4521"), and the user has "Visa" or "Credit Card" in their list, pick that.
-- If the source is a BANK STATEMENT (not a receipt) and you cannot tell if it's credit or debit from the text, add a follow_up_question: "Is this account a credit card or debit/checking account?" (JSON mode only).
-- If no payment clue exists at all, use the first payment in the user's list as default.
+- SCAN EVERY LINE of the text for card brands, bank names, and payment keywords before deciding
+- Match the detected payment type to the CLOSEST entry in the user's Payments list (exact spelling)
+- If multiple clues exist (e.g. "Visa Debit"), use the most specific one ("Debit Card")
+- If the source is a BANK STATEMENT and credit vs debit is genuinely ambiguous (card brand found but no "credit"/"debit" keyword), add a follow_up_question asking the user
+- If no payment clue exists at all, use the first payment in the user's list as default
 === End payment intelligence ===`;
 
 const SYSTEM_PROMPT_CSV_PLAIN = `You are an expert expense data extractor with merchant intelligence. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.

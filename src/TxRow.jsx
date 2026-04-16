@@ -1,6 +1,7 @@
 import { Trash2, ImageIcon } from "lucide-react";
 import { T } from "./config.js";
 import { getCat, fDate } from "./utils.js";
+import { CategoryIcon } from "./categoryIcons.jsx";
 
 export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLocale }) {
   const cat = getCat(categories, tx.category);
@@ -45,7 +46,7 @@ export function TxRow({ tx, onDelete, onSelect, categories, formatMoney, dateLoc
             position: "relative",
           }}
         >
-          {cat.e}
+          <CategoryIcon name={tx.category} size={20} color={cat.c} />
           {tx.receiptUrl ? (
             <span
               title="Receipt attached"

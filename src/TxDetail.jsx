@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X, Trash2, Users, Pencil } from "lucide-react";
 import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
+import { CategoryIcon } from "./categoryIcons.jsx";
 import { normalizePerson, personStableKey } from "./splitContactShare.js";
 
 /**
@@ -287,7 +288,7 @@ export function TxDetail({
               >
                 <option value="">—</option>
                 {(categories || []).map((c) => (
-                  <option key={c.n} value={c.n}>{c.e} {c.n}</option>
+                  <option key={c.n} value={c.n}>{c.n}</option>
                 ))}
               </select>
             </div>
@@ -365,7 +366,7 @@ export function TxDetail({
               margin: "0 auto 10px",
             }}
           >
-            {cat.e}
+            <CategoryIcon name={tx.category} size={28} color={cat.c} />
           </div>
           <div style={{ fontSize: 34, fontWeight: 800, color: T.txt }}>-{formatMoney(tx.amount)}</div>
           <div

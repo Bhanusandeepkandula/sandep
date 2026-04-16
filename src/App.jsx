@@ -31,6 +31,12 @@ import {
   Trash2,
   QrCode,
   ScanLine,
+  Target,
+  Lock,
+  ChevronRight,
+  ClipboardList,
+  Camera,
+  ImageIcon,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { T, card, card2, inp, lbl, pill } from "./config.js";
@@ -51,7 +57,7 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut, signInWithEmailAndPassword } from "firebase/auth";
 import { db, auth, initAnalytics } from "./firebase.js";
-import { FALLBACK_CATALOG, offlineStorageKey } from "./fallbackCatalog.js";
+import { FALLBACK_CATALOG, offlineStorageKey, FIXED_EXPENSE_TEMPLATES } from "./fallbackCatalog.js";
 import AuthGate from "./AuthGate.jsx";
 import { useShellLayout } from "./useShellLayout.js";
 import {
@@ -78,6 +84,7 @@ import { TxDetail } from "./TxDetail.jsx";
 import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
+import { CategoryIcon } from "./categoryIcons.jsx";
 import {
   buildSplitSharePayload,
   parseSplitSharePayload,
@@ -162,6 +169,9 @@ export default function App({ onReady }) {
   const [tab, setTab] = useState("home");
   const [txs, setTxs] = useState([]);
   const [budgets, setBudgets] = useState({});
+  const [fixedExpenses, setFixedExpenses] = useState([]);
+  const [showFixedModal, setShowFixedModal] = useState(false);
+  const [fixedDraft, setFixedDraft] = useState({ name: "", amount: "", category: "", dueDay: "1" });
   const [people, setPeople] = useState([]);
   const [catalog, setCatalog] = useState({
     categories: [],
@@ -486,6 +496,7 @@ export default function App({ onReady }) {
           }
           const d = snap.data();
           if (d.budgets && typeof d.budgets === "object") setBudgets(d.budgets);
+          if (Array.isArray(d.fixedExpenses)) setFixedExpenses(d.fixedExpenses);
           if (typeof d.monthlyBudgetTotal === "number" && Number.isFinite(d.monthlyBudgetTotal) && d.monthlyBudgetTotal > 0) {
             setMonthlyBudgetTotal(d.monthlyBudgetTotal);
           } else {
@@ -1276,10 +1287,16 @@ export default function App({ onReady }) {
                 "Medical: pharmacy, CVS, Walgreens, doctor, hospital.\n" +
                 "Transfer: Zelle sent, Venmo sent, PayPal sent, bank transfer, credit card payment (DISCOVER, CAPITAL ONE payment).\n" +
                 "INCOME (SKIP as expense): salary, deposit, interest, refund, Zelle received, incoming transfer, green + amounts.\n\n" +
-                "PAYMENT METHOD DETECTION for payment_hint:\n" +
-                "- Receipt shows Visa/MC/Amex/Discover or card ending → use that card type.\n" +
-                "- 'Cash', 'Cash Tendered' → Cash. 'Debit'/'POS' → Debit Card. 'Apple Pay'/'Google Pay' → mobile payment.\n" +
-                "- Bank statement: if you can't tell credit vs debit from the screen, set payment_hint to null (app will ask user).\n\n" +
+                "PAYMENT METHOD DETECTION for payment_hint — READ EVERY LINE of text for card/bank clues:\n" +
+                "- Card brands: Visa, Mastercard, MC, Amex, American Express, Discover, RuPay, JCB anywhere in text → Credit Card.\n" +
+                "- Card number endings: ****1234, x1234, XXXX1234, 'ending in', 'last 4 digits' → card payment.\n" +
+                "- Bank names with card hint: 'HDFC Credit', 'SBI Card', 'ICICI Platinum', 'Chase Sapphire', 'Axis CC' → Credit Card.\n" +
+                "- 'Debit', 'DB', 'POS', 'ATM', 'Savings A/C', 'check card' → Debit Card.\n" +
+                "- 'Cash', 'Cash Tendered', 'Change due' → Cash. 'UPI', 'GPay', 'PhonePe', 'Paytm', '@upi', '@ybl' → UPI.\n" +
+                "- 'Apple Pay', 'Google Pay', 'Samsung Pay', 'Tap to Pay' → mobile payment.\n" +
+                "- 'NEFT', 'RTGS', 'IMPS', 'ACH', 'Wire', 'Net Banking' → Bank Transfer.\n" +
+                "- If card brand found (e.g. Visa) but credit vs debit is unclear from a BANK STATEMENT → set payment_hint to null so app asks user.\n" +
+                "- If source is a RECEIPT and card brand visible → default to Credit Card.\n\n" +
                 "For transaction_list: output EVERY visible expense row in \"transactions\"; never stop at the first row. " +
                 "Read the transaction amount column, NOT the running balance column. " +
                 'Mark is_credit_or_income: true for deposits, incoming transfers, green + amounts, salary — do not list those as expenses.\n\n' +
@@ -1847,6 +1864,41 @@ export default function App({ onReady }) {
     setBudgets({});
   }
 
+  async function saveFixedExpense() {
+    const { name, amount, category, dueDay } = fixedDraft;
+    if (!name.trim() || !amount || isNaN(+amount) || +amount <= 0) return;
+    const entry = { name: name.trim(), amount: parseFloat(amount), category: category || "Bills", dueDay: parseInt(dueDay) || 1 };
+    const exists = fixedExpenses.findIndex((f) => f.name === entry.name);
+    const next = exists >= 0 ? fixedExpenses.map((f, i) => (i === exists ? entry : f)) : [...fixedExpenses, entry];
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { fixedExpenses: next }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    setFixedExpenses(next);
+    setShowFixedModal(false);
+    setFixedDraft({ name: "", amount: "", category: "", dueDay: "1" });
+  }
+
+  async function removeFixedExpense(name) {
+    if (!window.confirm(`Remove "${name}" from fixed expenses?`)) return;
+    const next = fixedExpenses.filter((f) => f.name !== name);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { fixedExpenses: next }, { merge: true });
+      } catch (e) {
+        console.error(e);
+        return;
+      }
+    }
+    setFixedExpenses(next);
+  }
+
+  const fixedTotal = fixedExpenses.reduce((s, f) => s + (f.amount || 0), 0);
+
   function toggleSplitPerson(name) {
     setSplitPpl((prev) => {
       const ex = prev.find((p) => p.n === name);
@@ -1923,31 +1975,7 @@ export default function App({ onReady }) {
         .pop{animation:pop .3s ease-out;}
       `}</style>
 
-      {fbStatus === "loading" && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            width: "100%",
-            maxWidth: maxShell,
-            marginLeft: "auto",
-            marginRight: "auto",
-            zIndex: 200,
-            padding: `10px ${px}px`,
-            paddingTop: `max(10px, ${safeTop})`,
-            background: T.card2,
-            borderBottom: `1px solid ${T.bdr}`,
-            fontSize: 12,
-            color: T.sub,
-            textAlign: "center",
-            boxSizing: "border-box",
-          }}
-        >
-          Connecting to cloud…
-        </div>
-      )}
+      {/* Skeleton screens handle the loading state — no banner needed */}
       {fbStatus === "error" && (
         <div
           style={{
@@ -2230,7 +2258,7 @@ export default function App({ onReady }) {
                   cursor: "pointer",
                 }}
               >
-                <div style={{ fontSize: 26 }}>📋</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}><ClipboardList size={26} color={T.warn} /></div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: T.warn }}>Daily Expense Log Pending</div>
                   <div style={{ fontSize: 12, color: T.sub, marginTop: 1 }}>No entries today — tap to log now</div>
@@ -2292,7 +2320,7 @@ export default function App({ onReady }) {
             >
               {[
                 {
-                  icon: "📷",
+                  Icon: Camera,
                   title: "Scan Bill",
                   sub: "AI reads receipt",
                   color: T.acc,
@@ -2304,7 +2332,7 @@ export default function App({ onReady }) {
                   },
                 },
                 {
-                  icon: "📊",
+                  Icon: BarChart2,
                   title: "Analytics",
                   sub: "Charts & insights",
                   color: T.blue,
@@ -2322,11 +2350,10 @@ export default function App({ onReady }) {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: 18,
                       flexShrink: 0,
                     }}
                   >
-                    {a.icon}
+                    <a.Icon size={18} color={a.color} strokeWidth={1.8} />
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>{a.title}</div>
@@ -2357,7 +2384,7 @@ export default function App({ onReady }) {
                       gap: 10,
                     }}
                   >
-                    <span style={{ fontSize: 20 }}>{cat.e}</span>
+                    <CategoryIcon name={c} size={20} color={over ? T.dng : T.warn} />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: over ? T.dng : T.warn }}>
                         {c} budget {over ? "exceeded!" : "at 80%"}
@@ -2564,31 +2591,31 @@ export default function App({ onReady }) {
               <div style={{ padding: `0 ${px}px` }}>
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>Choose how to add your expense</div>
                 {[
-                  { mode: "manual", icon: "✏️", title: "Manual Entry", sub: "Type in amount & details", col: T.acc },
+                  { mode: "manual", Icon: Pencil, title: "Manual Entry", sub: "Type in amount & details", col: T.acc },
                   {
                     mode: "import",
-                    icon: "📋",
+                    Icon: ClipboardList,
                     title: "Import CSV",
                     sub: "One .csv file — category names must match your app",
                     col: T.warn,
                   },
                   {
                     mode: "ocrCsv",
-                    icon: "🧾",
+                    Icon: ScanLine,
                     title: "OCR → CSV",
                     sub: "Paste bill text or OCR an image; OpenAI builds import CSV (dev server)",
                     col: T.purp,
                   },
                   {
                     mode: "image",
-                    icon: "📷",
+                    Icon: QrCode,
                     title: "Scan Receipt / Bill",
                     sub: "Take a photo or choose one image from your library",
                     col: T.blue,
                   },
                   {
                     mode: "statement",
-                    icon: "📄",
+                    Icon: Wallet,
                     title: "Upload Statement",
                     sub: "Bank or credit card PDF",
                     col: T.purp,
@@ -2641,7 +2668,9 @@ export default function App({ onReady }) {
                       transition: "border-color .15s, opacity .15s",
                     }}
                   >
-                    <div style={{ fontSize: 32 }}>{opt.icon}</div>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${opt.col}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <opt.Icon size={22} color={opt.col} strokeWidth={1.8} />
+                    </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         {opt.title}
@@ -2726,12 +2755,14 @@ export default function App({ onReady }) {
                     color: "inherit",
                   }}
                 >
-                  <div style={{ fontSize: 32 }}>📸</div>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${T.blue}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Camera size={22} color={T.blue} strokeWidth={1.8} />
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Take photo</div>
                     <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Opens your camera</div>
                   </div>
-                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                  <ChevronRight size={16} color={T.mut} />
                 </button>
                 <button
                   type="button"
@@ -2749,12 +2780,14 @@ export default function App({ onReady }) {
                     color: "inherit",
                   }}
                 >
-                  <div style={{ fontSize: 32 }}>🖼️</div>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <ImageIcon size={22} color={T.acc} strokeWidth={1.8} />
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Choose one photo</div>
                     <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>From gallery — one image only</div>
                   </div>
-                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                  <ChevronRight size={16} color={T.mut} />
                 </button>
               </div>
             )}
@@ -3343,7 +3376,7 @@ export default function App({ onReady }) {
                           minHeight: 40,
                         }}
                       >
-                        {c.e} {c.n}
+                        <CategoryIcon name={c.n} size={14} color={form.category === c.n ? "#000" : c.c} /> {c.n}
                       </button>
                     ))}
                   </div>
@@ -3676,8 +3709,8 @@ export default function App({ onReady }) {
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
-                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {b.e} {b.name}
+                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                            <CategoryIcon name={b.name} size={12} color={b.c} /> {b.name}
                           </span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -3726,8 +3759,8 @@ export default function App({ onReady }) {
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
-                            <span style={{ fontSize: 13 }}>
-                              {b.e} {b.name}
+                            <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+                              <CategoryIcon name={b.name} size={13} color={b.c} /> {b.name}
                             </span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3943,8 +3976,8 @@ export default function App({ onReady }) {
                     flexWrap: "wrap",
                   }}
                 >
-                  <div style={{ fontSize: 26, lineHeight: 1 }} aria-hidden>
-                    🎯
+                  <div style={{ lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
+                    <Target size={26} color={T.acc} />
                   </div>
                   <div style={{ flex: 1, minWidth: 140 }}>
                     <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Overall monthly cap</div>
@@ -4126,12 +4159,142 @@ export default function App({ onReady }) {
                       }}
                       style={{ ...card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", opacity: 0.55 }}
                     >
-                      <span style={{ fontSize: 22 }}>{c.e}</span>
+                      <CategoryIcon name={c.n} size={20} color={c.c} />
                       <span style={{ fontSize: 14, fontWeight: 600 }}>{c.n}</span>
                       <div style={{ marginLeft: "auto", fontSize: 12, color: T.acc, border: `1px solid ${T.acc}`, borderRadius: 8, padding: "4px 10px" }}>+ Add</div>
                     </div>
                   ))}
                 </>
+              )}
+            </div>
+
+            {/* ─── Fixed / Mandatory Expenses ─── */}
+            <div style={{ padding: `0 ${px}px`, marginTop: 22 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Lock size={16} color={T.purp} />
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>Fixed Monthly Expenses</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFixedDraft({ name: "", amount: "", category: categories[0]?.n || "Bills", dueDay: "1" });
+                    setShowFixedModal(true);
+                  }}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    background: T.purp,
+                    border: "none",
+                    color: "#000",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: T.sub, marginBottom: 12, lineHeight: 1.45 }}>
+                Bills you must pay every month — rent, utilities, EMIs, subscriptions. These help you know your committed spending before discretionary expenses.
+              </div>
+
+              {fixedExpenses.length > 0 && (
+                <div
+                  style={{
+                    background: "linear-gradient(135deg,#1C1C32 0%,#151530 100%)",
+                    borderRadius: T.rLg,
+                    padding: 18,
+                    border: `1px solid ${T.bdr}`,
+                    marginBottom: 14,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Total fixed / month</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.purp }}>{formatMoney(fixedTotal)}</div>
+                  </div>
+                  {monthlyBudgetTotal ? (
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 11, color: T.sub }}>Discretionary</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: monthlyBudgetTotal - fixedTotal > 0 ? T.acc : T.dng }}>
+                        {formatMoney(Math.max(0, monthlyBudgetTotal - fixedTotal))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {fixedExpenses.map((fe) => (
+                <div
+                  key={fe.name}
+                  style={{
+                    ...card,
+                    marginBottom: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <CategoryIcon name={fe.category} size={20} color={T.purp} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fe.name}</div>
+                    <div style={{ fontSize: 11, color: T.sub }}>Due day {fe.dueDay || 1} · {fe.category}</div>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700, flexShrink: 0 }}>{formatMoney(fe.amount)}</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFixedDraft({ name: fe.name, amount: String(fe.amount), category: fe.category, dueDay: String(fe.dueDay || 1) });
+                      setShowFixedModal(true);
+                    }}
+                    style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void removeFixedExpense(fe.name)}
+                    style={{ background: "none", border: "none", color: T.dng, cursor: "pointer", padding: 4, opacity: 0.7 }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+
+              {fixedExpenses.length === 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 10 }}>Quick-add common expenses:</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {FIXED_EXPENSE_TEMPLATES.slice(0, 8).map((t) => (
+                      <button
+                        key={t.name}
+                        type="button"
+                        onClick={() => {
+                          setFixedDraft({ name: t.name, amount: "", category: t.category, dueDay: "1" });
+                          setShowFixedModal(true);
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${T.bdr}`,
+                          background: T.card2,
+                          color: T.txt,
+                          fontSize: 12,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                        }}
+                      >
+                        <CategoryIcon name={t.category} size={12} color={T.purp} />
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
@@ -4378,18 +4541,20 @@ export default function App({ onReady }) {
                 </div>
               </button>
               {[
-                { icon: "🔔", label: "Notifications", sub: "Daily reminders & alerts" },
-                { icon: "💱", label: "Currency", sub: "INR ₹" },
-                { icon: "📤", label: "Export Data", sub: "Download CSV or PDF" },
-                { icon: "🔒", label: "Privacy & Security", sub: "Data & permissions" },
+                { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn },
+                { Icon: RefreshCw, label: "Currency", sub: "INR ₹", color: T.acc },
+                { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue },
+                { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp },
               ].map((item, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 3 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
-                  <div style={{ fontSize: 22 }}>{item.icon}</div>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${item.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <item.Icon size={18} color={item.color} strokeWidth={1.8} />
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
                     <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
                   </div>
-                  <span style={{ color: T.mut, fontSize: 18 }}>›</span>
+                  <ChevronRight size={16} color={T.mut} />
                 </div>
               ))}
             </div>
@@ -4537,7 +4702,7 @@ export default function App({ onReady }) {
                 <option value={MONTH_TOTAL_BUDGET_KEY}>All spending this month (overall cap)</option>
                 {categories.map((c) => (
                   <option key={c.n} value={c.n}>
-                    {c.e} {c.n}
+                    {c.n}
                   </option>
                 ))}
               </select>
@@ -4590,6 +4755,152 @@ export default function App({ onReady }) {
                 }}
               >
                 Save Budget
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showFixedModal ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            zIndex: 500,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowFixedModal(false); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: maxShell,
+              maxHeight: "90dvh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              background: T.card,
+              borderRadius: "20px 20px 0 0",
+              padding: 24,
+              paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 18, display: "flex", alignItems: "center", gap: 8 }}>
+              <Lock size={18} color={T.purp} /> {fixedDraft.name ? "Edit Fixed Expense" : "Add Fixed Expense"}
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Expense name</label>
+              <input
+                type="text"
+                placeholder="e.g. House Rent"
+                value={fixedDraft.name}
+                onChange={(e) => setFixedDraft((d) => ({ ...d, name: e.target.value }))}
+                style={inp}
+              />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Monthly amount</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="Enter amount"
+                value={fixedDraft.amount}
+                onChange={(e) => setFixedDraft((d) => ({ ...d, amount: e.target.value }))}
+                style={{ ...inp, fontSize: 20, fontWeight: 700 }}
+              />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+              <div>
+                <label style={lbl}>Category</label>
+                <select
+                  value={fixedDraft.category}
+                  onChange={(e) => setFixedDraft((d) => ({ ...d, category: e.target.value }))}
+                  style={inp}
+                >
+                  {categories.map((c) => (
+                    <option key={c.n} value={c.n}>{c.n}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Due day of month</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={31}
+                  value={fixedDraft.dueDay}
+                  onChange={(e) => setFixedDraft((d) => ({ ...d, dueDay: e.target.value }))}
+                  style={inp}
+                />
+              </div>
+            </div>
+            {fixedExpenses.length === 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Or pick from templates:</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {FIXED_EXPENSE_TEMPLATES.map((t) => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      onClick={() => setFixedDraft((d) => ({ ...d, name: t.name, category: t.category }))}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        border: fixedDraft.name === t.name ? `1px solid ${T.purp}` : `1px solid ${T.bdr}`,
+                        background: fixedDraft.name === t.name ? `${T.purp}22` : T.card2,
+                        color: T.txt,
+                        fontSize: 11,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowFixedModal(false)}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: T.r,
+                  border: `1px solid ${T.bdr}`,
+                  background: "transparent",
+                  color: T.sub,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!fixedDraft.name.trim() || !fixedDraft.amount || isNaN(+fixedDraft.amount) || +fixedDraft.amount <= 0}
+                onClick={() => void saveFixedExpense()}
+                style={{
+                  flex: 2,
+                  padding: 14,
+                  borderRadius: T.r,
+                  background: T.purp,
+                  border: "none",
+                  color: "#000",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: !fixedDraft.name.trim() || !fixedDraft.amount ? "not-allowed" : "pointer",
+                  opacity: !fixedDraft.name.trim() || !fixedDraft.amount ? 0.45 : 1,
+                }}
+              >
+                Save
               </button>
             </div>
           </div>

@@ -101,12 +101,43 @@ export function parseDateToISO(input) {
  */
 export function matchCatalogName(raw, names) {
   const r = String(raw).trim();
-  if (!r) return null;
+  if (!r || !names.length) return null;
   const rl = r.toLowerCase();
+
+  // 1. Exact match
   const exact = names.find((n) => n.toLowerCase() === rl);
   if (exact) return exact;
+
+  // 2. Substring match (either direction)
   const inc = names.find((n) => n.toLowerCase().includes(rl) || rl.includes(n.toLowerCase()));
-  return inc || null;
+  if (inc) return inc;
+
+  // 3. Plural/singular normalization: "Groceries" ↔ "Grocery", "Bills" ↔ "Bill"
+  const norm = (s) => s.toLowerCase().replace(/ies$/, "y").replace(/s$/, "");
+  const rNorm = norm(r);
+  const pluralMatch = names.find((n) => norm(n) === rNorm);
+  if (pluralMatch) return pluralMatch;
+
+  // 4. Word-level overlap: "Food & Dining" matches "Food" or "Dining"
+  const rWords = rl.split(/[\s&/,._-]+/).filter((w) => w.length > 2);
+  let bestScore = 0;
+  let bestName = null;
+  for (const n of names) {
+    const nWords = n.toLowerCase().split(/[\s&/,._-]+/).filter((w) => w.length > 2);
+    let score = 0;
+    for (const rw of rWords) {
+      for (const nw of nWords) {
+        if (rw === nw || nw.startsWith(rw) || rw.startsWith(nw)) score++;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestName = n;
+    }
+  }
+  if (bestName && bestScore > 0) return bestName;
+
+  return null;
 }
 
 /**

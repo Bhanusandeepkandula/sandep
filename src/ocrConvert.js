@@ -74,51 +74,124 @@ export function ocrTextLooksMissingFourDigitYear(text) {
   return !/\b(19|20)\d{2}\b/.test(String(text || ""));
 }
 
-const SYSTEM_PROMPT_CSV_PLAIN = `You are an expense data extractor. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
+const MERCHANT_CATEGORY_INTELLIGENCE = `
+=== MERCHANT → CATEGORY INTELLIGENCE (use to pick the best category) ===
+Categorize by PURPOSE of the spend, not the store name. Use these rules to pick from the user's category list:
+
+FOOD / DINING / RESTAURANTS:
+- Restaurant names, "SQ *", Uber Eats, DoorDash, Grubhub, Pei Wei, Chipotle, McDonald's, Starbucks, Dunkin, Chick-fil-A, Panera, Subway, pizza, diner, cafe, bistro, grill, buffet, sushi, ramen, taco, BBQ, bakery
+- Keywords: "purchase" at a food establishment, POS terminal at eatery
+
+GROCERIES:
+- Walmart (grocery context), Costco, Sam's Club, Kroger, Safeway, Albertsons, Publix, Trader Joe's, Whole Foods, Aldi, H-E-B, Target (grocery), WinCo, Sprouts, Fresh Market, ethnic grocery stores
+
+TRANSPORT / GAS / AUTO:
+- Shell, Chevron, BP, ExxonMobil, Texaco, 76, Marathon, Speedway, QuikTrip, Casey's, Wawa (gas)
+- Uber, Lyft, taxi, parking, toll, DMV, auto parts, car wash, oil change, tire, mechanic
+
+SHOPPING / RETAIL:
+- Amazon, Target, Walmart (non-grocery), Best Buy, Home Depot, Lowe's, IKEA, Costco (non-grocery), TJ Maxx, Marshalls, Ross, Nordstrom, Macy's, clothing stores, electronics stores
+
+BILLS / UTILITIES:
+- Electric, gas (utility), water, sewer, trash, internet, phone bill, AT&T, Verizon, T-Mobile, Comcast, Spectrum, Duke Energy, PG&E, municipal utility
+
+SUBSCRIPTIONS:
+- Netflix, Spotify, Disney+, Hulu, HBO Max, Apple TV+, YouTube Premium, Amazon Prime, Adobe, Microsoft 365, iCloud, Dropbox, gym membership, newspaper
+
+MEDICAL / HEALTH:
+- Pharmacy, CVS, Walgreens, Rite Aid, doctor, dentist, hospital, clinic, urgent care, lab, insurance copay, optical, mental health
+
+TRANSFERS (skip as expense or use Transfer category if available):
+- Zelle, Venmo (sent), PayPal (sent), Cash App, bank transfer, wire transfer, ACH, "CAPITAL ONE" (payment to credit card), "DISCOVER" (card payment), mortgage payment between own accounts
+- Zelle Money Sent = Transfer. Zelle Money Received = income (SKIP).
+- "Transfer" from/to own accounts = NOT an expense, skip or use Transfer category.
+
+INCOME (ALWAYS SKIP — never output as expense row):
+- Salary, payroll, direct deposit, interest earned, dividends, refund, cashback reward, tax refund, venmo/zelle received, incoming transfer, deposit, "+$" amounts in green, credits
+- Keywords: "deposit", "credit", "received", "incoming", "payroll", "interest"
+
+RENT / HOUSING:
+- Rent payment, mortgage, HOA, property management, apartment complex names
+
+EDUCATION:
+- Tuition, university, college, school, Coursera, Udemy, textbook, student loan payment
+
+ENTERTAINMENT:
+- Movies, concerts, sports tickets, amusement, gaming, Steam, PlayStation, Xbox, Nintendo, bowling, arcade, museum, zoo
+
+TRAVEL:
+- Airlines, hotels, Airbnb, booking.com, Expedia, luggage, car rental, Hertz, Enterprise, toll roads
+=== End merchant intelligence ===`;
+
+const SYSTEM_PROMPT_CSV_PLAIN = `You are an expert expense data extractor with merchant intelligence. Given raw OCR text from a receipt, bank statement, or bill, extract expenses and return ONLY a CSV string.
 
 CRITICAL — first line of your reply MUST be this exact header (copy it verbatim, character for character):
 ${HEADER_LINE}
 
 Do not put a data row on line 1. Do not skip the header. If there is one expense, output exactly two lines: the header line above, then one data line.
 
+${MERCHANT_CATEGORY_INTELLIGENCE}
+
 Column rules (data rows only, after the header):
 - date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message for the year. If ambiguous (e.g. "12/05"), treat as DD/MM. If OCR shows only MONTH+YEAR (no day), use day 01.
-- amount: positive number only, no currency symbols or commas in the number.
-- category: MUST be copied EXACTLY (same spelling, same case) from the Categories list. Pick the closest match. If nothing fits, use the very first category in the list.
-- payment: MUST be copied EXACTLY from the Payments list. Pick the closest match. If nothing fits, use the very first payment in the list.
-- notes: merchant/restaurant name or short description (max 60 chars).
+- amount: positive number only, no currency symbols or commas in the number. Read the EXACT amount from the text — never round or guess.
+- category: Use the MERCHANT CATEGORY INTELLIGENCE above to understand the transaction, then pick the CLOSEST match from the user's Categories list. MUST be copied EXACTLY (same spelling, same case). If nothing fits, use the very first category in the list.
+- payment: Identify from context (Card, Cash, Zelle, Venmo, bank name). MUST be copied EXACTLY from the Payments list. If nothing fits, use the very first payment in the list.
+- notes: merchant/restaurant CLEAN name (remove "SQ *", "TST*", store numbers, "#1234"). Max 60 chars.
 - tags: optional; leave the field empty if none (trailing comma is fine).
 
-Amount rules — IMPORTANT:
-- For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE data row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual line items.
-- For a bank statement or transaction list: output ONE row per **expense / purchase / money going OUT** only. Do NOT output rows for: salary, payroll, interest earned, dividends, bank credits, deposits, transfers received, or any money **coming IN**. Skip those lines entirely.
+AMOUNT EXTRACTION — CRITICAL:
+- For a single receipt/bill (restaurant, shop, etc.): output EXACTLY ONE data row using the GRAND TOTAL / FINAL TOTAL amount. Never split into individual line items. Prefer: Grand Total > Total Due > Total > Balance Due > Subtotal+Tax.
+- For a bank statement or transaction list: output ONE row per expense/purchase/money going OUT only.
+- SKIP these entirely (do NOT output rows): salary, payroll, interest earned, dividends, bank credits, deposits, transfers received, refunds, cashback, any money COMING IN, "+$" green amounts.
 - If the text only describes income/credits and no purchases, output the header row only (no data rows).
-- Always prefer GRAND TOTAL > TOTAL > subtotal for receipts. Taxes and service charges are included in the grand total.
+
+OCR ERROR CORRECTION:
+- Fix common OCR confusions: O↔0, l↔1, S↔5, B↔8, Z↔2, comma↔period in amounts.
+- Merge split lines: if a merchant name is on one line and the amount on the next, combine them.
+- "SQ *MERCHANT" → notes: "Merchant". "TST* RESTAURANT" → notes: "Restaurant". Strip prefixes.
 
 Output rules:
 - Return ONLY the CSV text. No markdown, no explanation, no code fences, no leading commentary.
 - Use double-quotes around any field that contains a comma.`;
 
-const SYSTEM_PROMPT_OCR_JSON = `You turn noisy OCR text (typos, broken lines, mixed columns) from receipts, bills, and bank snippets into valid expense data.
+const SYSTEM_PROMPT_OCR_JSON = `You are an expert expense data extractor with merchant intelligence. You turn noisy OCR text (typos, broken lines, mixed columns) from receipts, bills, and bank snippets into valid expense data.
 
 YOU MUST OUTPUT ONLY VALID JSON. No markdown fences, no commentary before or after.
 Shape:
 {"csv_lines":["${HEADER_LINE}","<data row 1>", ...], "follow_up_questions":["<question>", ...]}
 
+${MERCHANT_CATEGORY_INTELLIGENCE}
+
 csv_lines rules:
 - Index 0 must be exactly: ${HEADER_LINE}
 - Each further element is ONE complete CSV data row (same columns). Use double-quotes inside a row when a field contains commas.
-- Work hard on messy OCR: fix common confusions (O/0, l/1, S/5), merge split lines when obvious, infer merchant names from fragments.
-- date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message for the year — never guess a different year. If OCR shows only MONTH+YEAR (no day), use day 01. If the bill date is completely missing, use follow_up_questions to ask the user.
-- amount: positive number only, no currency symbols inside the number. NEVER guess a total you cannot support from the text; if no plausible total exists, output csv_lines with HEADER ONLY (no data rows) and ask in follow_up_questions for the grand total / missing amounts.
-- category and payment: MUST match the user's lists EXACTLY (same spelling and case). Pick the closest semantic match.
-- Single paper receipt: EXACTLY ONE data row = grand total (not every line item). Bank list: one row per purchase/debit (money OUT); skip salary, deposits, credits.
-- If the snippet is clearly not financial, output header only and one follow_up_question asking for bill or transaction text.
+
+OCR ERROR CORRECTION (apply aggressively):
+- Fix common confusions: O↔0, l↔1, S↔5, B↔8, Z↔2, comma↔period in dollar amounts.
+- Merge split lines: if a merchant name is on one line and the amount on the next, combine them into one row.
+- Reconstruct merchant names from fragments: "STAR BUCKS" → "Starbucks", "WAL MART" → "Walmart", "CHICK FIL" → "Chick-fil-A".
+- Clean prefixes: "SQ *MERCHANT" → "Merchant", "TST* RESTAURANT" → "Restaurant", "PP*PAYPAL" → actual merchant.
+- If text has columns (date | description | amount | balance), read each column correctly — balance is NOT the expense amount.
+
+FIELD RULES:
+- date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message — never guess a different year. If OCR shows only MONTH+YEAR (no day), use day 01. If the bill date is completely missing, use follow_up_questions to ask the user.
+- amount: positive number only, no currency symbols. Read the EXACT number from the text. For receipts, use GRAND TOTAL (includes tax+tip). NEVER guess a total you cannot support from the text; if no plausible total exists, output csv_lines with HEADER ONLY and ask in follow_up_questions.
+- category: Use MERCHANT CATEGORY INTELLIGENCE to understand the transaction, then pick the CLOSEST match from the user's category list. MUST match EXACTLY (same spelling and case).
+- payment: Identify from context (card type, bank name, Zelle, Venmo, Cash). MUST match the user's payment list EXACTLY.
+- notes: CLEAN merchant name (no store numbers, no "SQ*", no "#1234"). Max 60 chars.
+- tags: optional; leave empty if none.
+
+AMOUNT + ROW RULES:
+- Single paper receipt: EXACTLY ONE data row = grand total. Never split line items into separate rows.
+- Bank/transaction list: one row per purchase/debit (money OUT). SKIP: salary, payroll, deposits, interest, refunds, cashback, transfers received, "+$" credits, any money coming IN.
+- "Zelle Money Sent" = expense (Transfer). "Zelle Money Received" = income (SKIP). "Transfer" between own accounts = check context.
+- If the snippet is clearly not financial, output header only and one follow_up_question.
 
 follow_up_questions (required array, can be empty):
-- 0–6 short, specific questions in plain language ONLY when data is missing, ambiguous, or should be verified (e.g. "The total is hard to read — what is the amount on the receipt?", "Which currency is this?").
-- Use [] when you are confident and all required fields are grounded in the OCR text.
-- Do not duplicate questions.`;
+- 0–6 short, specific questions ONLY when data is genuinely missing or ambiguous.
+- Examples: "The total is hard to read — what is the amount?", "Is the $5,249.82 from BLUEICON INC income or an expense?"
+- Use [] when confident. Do not duplicate. Do not ask unnecessary questions.`;
 
 /**
  * Force every category/payment cell to exactly match a catalog entry.
@@ -215,17 +288,43 @@ function dedupeQuestions(items) {
  * @param {string} raw
  */
 function parseModelJson(raw) {
-  const t = String(raw || "")
+  let t = String(raw || "")
     .trim()
     .replace(/^```json?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
+
+  // Strip any leading prose before the JSON (model sometimes adds explanation)
+  const firstBrace = t.indexOf("{");
+  if (firstBrace > 0) {
+    t = t.slice(firstBrace);
+  }
+
+  // Try direct parse
   try {
     return JSON.parse(t);
-  } catch {
-    const m = t.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
+  } catch { /* continue */ }
+
+  // Try extracting the outermost JSON object
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch { /* continue */ }
   }
+
+  // Try fixing common JSON issues: trailing commas, single quotes
+  try {
+    const fixed = t
+      .replace(/,\s*([}\]])/g, "$1") // trailing commas
+      .replace(/'/g, '"');           // single quotes → double
+    return JSON.parse(fixed);
+  } catch { /* continue */ }
+
+  // Last resort: try extracting JSON array (some models return [])
+  const arrMatch = t.match(/\[[\s\S]*\]/);
+  if (arrMatch) {
+    try { return { csv_lines: JSON.parse(arrMatch[0]), follow_up_questions: [] }; } catch { /* continue */ }
+  }
+
   throw new Error("Could not read the AI response. Try again.");
 }
 
@@ -236,11 +335,26 @@ function parseModelJson(raw) {
  * @returns {string | null}
  */
 function tryRecoverPlainCsvFromRaw(raw, categories, payments) {
-  const csv = String(raw || "")
+  let csv = String(raw || "")
     .replace(/^```(?:csv)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
-  if (!csv || !/^date\s*,\s*amount/i.test(csv.split("\n")[0] || "")) return null;
+
+  // Strip any leading prose before the CSV header
+  const lines = csv.split("\n");
+  const headerIdx = lines.findIndex((l) => /^date\s*,\s*amount/i.test(l.trim()));
+  if (headerIdx > 0) {
+    csv = lines.slice(headerIdx).join("\n");
+  } else if (headerIdx < 0) {
+    // Try to find any line that looks like CSV data (YYYY-MM-DD,number,...)
+    const dataIdx = lines.findIndex((l) => /^\d{4}-\d{2}-\d{2}\s*,/.test(l.trim()));
+    if (dataIdx >= 0) {
+      csv = HEADER_LINE + "\n" + lines.slice(dataIdx).join("\n");
+    } else {
+      return null;
+    }
+  }
+
   const withHeader = ensureExpenseCsvHeaderRow(csv);
   return fixCatalogColumns(withHeader, categories, payments);
 }
@@ -452,33 +566,42 @@ function assessExpenseCsvQuality(csvString, categories, payments) {
   return rows.some((r) => r.ok);
 }
 
-const VISION_SYSTEM_PROMPT = `You analyze photos and screenshots for a personal expense app.
+const VISION_SYSTEM_PROMPT = `You are an expert expense extractor with merchant intelligence. You analyze photos and screenshots for a personal expense tracking app.
 
 STEP 1 — INTENT (required):
-- "supported": The image shows a paper receipt, invoice, bill, bank/credit app transaction list, payment confirmation, or any screen where monetary expenses can be read.
+- "supported": The image shows a paper receipt, invoice, bill, bank/credit app transaction list, payment confirmation, Zelle/Venmo screen, or any screen where monetary expenses can be read.
 - "unsupported": The image is NOT suitable — e.g. selfie, landscape, chat app, social media, game, settings screen with no amounts, blank, unreadable, or unrelated to spending.
 
 STEP 2 — If "unsupported":
 Return ONLY valid JSON: {"intent":"unsupported","message":"Short reason for the user (one sentence)."}
-Do not include csv.
 
 STEP 3 — If "supported":
 Return ONLY valid JSON:
-{"intent":"supported","csv_lines":["date,amount,category,payment,notes,tags","first data row",...],"follow_up_questions":[]}
+{"intent":"supported","csv_lines":["${HEADER_LINE}","first data row",...],"follow_up_questions":[]}
 
-Use "csv_lines" where index 0 is the header line (exactly matching the header below) and each following element is one CSV data row.
+${MERCHANT_CATEGORY_INTELLIGENCE}
 
-Include "follow_up_questions": array of 0–6 short questions for the user ONLY when something is unclear (unreadable total, ambiguous date, currency, cropped screen). Use [] when confident. Never invent amounts — ask instead.
+CSV FIELD RULES:
+- csv_lines[0] MUST be exactly: ${HEADER_LINE}
+- Each following element = one CSV data row. Use double-quotes if a field contains commas.
 
-CSV rules (same as text OCR):
-- First line MUST be exactly: ${HEADER_LINE}
-- One row per expense (grand total for a single receipt; one row per debit/purchase for bank lists).
-- Skip income, deposits, salary, credits (money IN).
-- date YYYY-MM-DD, amount positive number, category and payment MUST match the provided lists exactly (copy spelling).
-- notes: merchant or label, max ~60 chars.
-- If the on-screen date does not show a year (e.g. "Apr 15"), ALWAYS follow the MANDATORY DATE RULES block in the user message for the year — never guess a different year.
+- date: YYYY-MM-DD. ALWAYS follow the MANDATORY DATE RULES block in the user message — never guess a different year. If the screen shows "Apr 15" with no year, use the year from MANDATORY DATE RULES.
+- amount: positive number, EXACT as shown on screen. No currency symbols, no commas. For receipts: use GRAND TOTAL (includes tax+tip). For bank lists: use the transaction amount (NOT the running balance column).
+- category: Use MERCHANT CATEGORY INTELLIGENCE to understand the merchant/transaction, then pick the CLOSEST match from the user's Categories list. Copy EXACTLY (same spelling, same case).
+- payment: Identify from context (card brand, bank app, Zelle, Venmo, Cash). Copy EXACTLY from user's Payments list.
+- notes: CLEAN merchant name — remove "SQ *", "TST*", store numbers, "#1234", "Purchase", "Transfer" prefixes. Just the merchant name. Max 60 chars.
+- tags: optional; leave empty.
 
-If the image is blurry but still financial, do your best; if truly unreadable, use intent unsupported with message explaining.`;
+ROW RULES:
+- Single receipt/bill: EXACTLY ONE row = grand total. Never split into line items.
+- Bank/transaction list screenshot: ONE row per expense (money OUT). Read EVERY visible row, top to bottom.
+- SKIP (never output as expense): deposits, salary, interest, refunds, cashback, incoming transfers, Zelle received, green "+$" amounts, credits.
+- "Zelle Money Sent" → expense. "Zelle Money Received" / incoming transfer → SKIP.
+- Balance column (running total after each transaction) is NOT the expense amount — use the transaction amount column.
+
+follow_up_questions: 0–6 short questions ONLY when genuinely ambiguous. Use [] when confident. Never invent amounts — ask instead.
+
+If the image is blurry but still financial, extract what you can; if truly unreadable, use intent unsupported.`;
 
 /**
  * Image → CSV via vision (no local OCR). Validates intent and CSV quality.

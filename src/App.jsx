@@ -1246,16 +1246,29 @@ export default function App() {
             {
               role: "system",
               content:
-                "You read receipt photos AND banking app screenshots. Return ONLY valid JSON, no markdown, no extra text. " +
-                "Decide image_kind first: single_receipt (one purchase / one total) vs transaction_list (multiple rows: bank history, Zelle list, etc.). " +
-                "For transaction_list, output every expense row you can read in \"transactions\"; never stop at the first row. " +
-                "For single_receipt, totals must reflect money spent (purchases), not bank credits or deposits. " +
-                "Include \"missing_fields\" only on single_receipt when fields are unreadable (total, date, category, payment, notes, line_items). " +
-                "Mark is_credit_or_income true for incoming money so the app can skip it as an expense. " +
+                "You are an expert expense extractor with merchant intelligence. You read receipt photos AND banking app screenshots. Return ONLY valid JSON, no markdown, no extra text.\n\n" +
+                "STEP 1 — Decide image_kind:\n" +
+                '- "single_receipt": one paper/store receipt, one invoice, one bill with ONE total.\n' +
+                '- "transaction_list": banking app screenshot, account history, Zelle/Venmo list, or ANY screen showing MULTIPLE dated rows with merchant + amount.\n\n' +
+                "MERCHANT → CATEGORY INTELLIGENCE (use to assign category_hint):\n" +
+                "Food/Dining: restaurants, SQ*, Uber Eats, DoorDash, Starbucks, pizza, cafe, diner, fast food.\n" +
+                "Groceries: Walmart (grocery), Costco, Kroger, Safeway, Target (grocery), Trader Joe's, Whole Foods.\n" +
+                "Transport/Gas: Shell, Chevron, BP, Uber, Lyft, parking, toll, gas station.\n" +
+                "Shopping: Amazon, Target (non-food), Best Buy, Home Depot, clothing stores.\n" +
+                "Bills/Utilities: electric, water, internet, phone bill, AT&T, Verizon, Comcast.\n" +
+                "Subscriptions: Netflix, Spotify, Disney+, Adobe, gym membership.\n" +
+                "Medical: pharmacy, CVS, Walgreens, doctor, hospital.\n" +
+                "Transfer: Zelle sent, Venmo sent, PayPal sent, bank transfer, credit card payment (DISCOVER, CAPITAL ONE payment).\n" +
+                "INCOME (SKIP as expense): salary, deposit, interest, refund, Zelle received, incoming transfer, green + amounts.\n\n" +
+                "For transaction_list: output EVERY visible expense row in \"transactions\"; never stop at the first row. " +
+                "Read the transaction amount column, NOT the running balance column. " +
+                'Mark is_credit_or_income: true for deposits, incoming transfers, green + amounts, salary — do not list those as expenses.\n\n' +
+                "For single_receipt: use GRAND TOTAL (includes tax+tip). Include \"missing_fields\" when fields are unreadable.\n\n" +
+                "CLEAN MERCHANT NAMES in notes: remove \"SQ *\", \"TST*\", store numbers, \"#1234\", \"Purchase\" prefix. Just the merchant name.\n\n" +
                 `DATE YEAR RULE: Today is ${new Date().toISOString().split("T")[0]}. ` +
                 `For any date that lacks a year, use ${new Date().getFullYear()} as the year. ` +
                 `If the month is > ${new Date().getMonth() + 1} (current month), use ${new Date().getFullYear() - 1} instead (those months haven't happened yet). ` +
-                "NEVER output future dates. NEVER guess years like 2023 or 2024 — only use the current or previous year as described.",
+                "NEVER output future dates. NEVER guess years like 2023 or 2024.",
             },
             { role: "user", content: userContent },
           ],

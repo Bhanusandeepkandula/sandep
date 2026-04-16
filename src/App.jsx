@@ -51,6 +51,7 @@ import { extractExpenseJson, normalizeScanResult } from "./scanAi.js";
 import { convertOcrToCsv } from "./ocrConvert.js";
 import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
+import { extractTextFromFile } from "./docExtract.js";
 
 const API = `${import.meta.env.BASE_URL}anthropic/v1/messages`;
 
@@ -912,21 +913,16 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
     setOcrCsvErr("");
     setOcrCsvTessBusy(true);
     try {
-      const raw = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("read failed"));
-        reader.readAsDataURL(f);
-      });
-      if (typeof raw !== "string") return;
-      const text = await extractReceiptTextWithOcr(raw);
+      const text = await extractTextFromFile(f, () => {});
       setOcrCsvText((prev) => {
         const p = prev.trim();
         return p ? `${p}\n\n${text}` : text;
       });
     } catch (err) {
       console.error(err);
-      setOcrCsvErr("Could not read text from this image (try JPEG/PNG).");
+      setOcrCsvErr(
+        err instanceof Error ? err.message : "Could not extract text from this file."
+      );
     } finally {
       try {
         input.value = "";
@@ -1645,7 +1641,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                 <input
                   ref={ocrCsvImgRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf,.pdf,.xlsx,.xls,.ods"
                   style={{ display: "none" }}
                   onChange={(e) => void fillOcrFromImageFile(e)}
                 />
@@ -1679,7 +1675,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
                       background: T.card2,
                     }}
                   >
-                    {ocrCsvTessBusy ? "Reading image…" : "Add text from image"}
+                    {ocrCsvTessBusy ? "Extracting text…" : "Extract text from file"}
                   </button>
                 </div>
                 <label style={lbl}>OCR / bill text</label>

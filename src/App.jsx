@@ -355,6 +355,8 @@ export default function App({ onReady }) {
   const mirrorMetaRef = useRef({});
   /** Tracks last-known settlement state on the MASTER's own tx docs so we can notify the master when a peer settles (or un-settles). Keyed by txId → { [peerUid]: amount }. */
   const peerSettlementsRef = useRef({});
+  /** Tracks last-known `settlement` field on mirror txs so the slave gets notified when the master records (or clears) a payment on their behalf. */
+  const mirrorSettlementRef = useRef({});
 
   const [tips, setTips] = useState([]);
   const [ldTips, setLdTips] = useState(false);
@@ -509,6 +511,7 @@ export default function App({ onReady }) {
       setProfileTagUuid("");
       seenTxIdsRef.current = null;
       peerSettlementsRef.current = {};
+      mirrorSettlementRef.current = {};
       notifiedMirrorIdsRef.current = new Set();
       mirrorAmountRef.current = {};
       mirrorMetaRef.current = {};
@@ -765,6 +768,49 @@ export default function App({ onReady }) {
                 notes: tx.notes || "",
                 amount: curAmt,
               };
+
+              /* Slave-side: detect master-recorded settlement changes on this
+               * mirror. We only surface a notification when the change was
+               * flagged `recordedByMaster: true` — otherwise the slave just
+               * saw their own save round-trip through Firestore. */
+              const prevS = mirrorSettlementRef.current[tx.id] || null;
+              const curS = (tx && tx.settlement && typeof tx.settlement === "object") ? tx.settlement : null;
+              const prevAmtS = Number(prevS?.amount) || 0;
+              const curAmtS = Number(curS?.amount) || 0;
+              const fromMaster = Boolean(curS?.recordedByMaster) || Boolean(prevS?.recordedByMaster);
+              if (fromMaster) {
+                if (!prevS && curS) {
+                  const body = `${merchant} · ${formatMoneyRef.current(curAmtS)} ${curS.full ? "fully" : "partially"} recorded by the payer`;
+                  dlg.toast(body, {
+                    type: "info",
+                    title: "Payment logged by payer",
+                    duration: 6000,
+                    actionLabel: "View",
+                    onClick: () => { setSelectedTx(tx); setTab("home"); },
+                  });
+                  try {
+                    if ("Notification" in window && Notification.permission === "granted") {
+                      const n = new Notification("Payment logged by payer", { body, tag: `mirror-settle-${tx.id}`, icon: "/favicon.ico" });
+                      n.onclick = () => { try { window.focus(); } catch { /* ignore */ } setSelectedTx(tx); setTab("home"); };
+                    }
+                    if ("vibrate" in navigator) navigator.vibrate([60, 40, 120]);
+                  } catch { /* ignore */ }
+                } else if (prevS && !curS) {
+                  const body = `${merchant} · the payer cleared a ${formatMoneyRef.current(prevAmtS)} payment from your side`;
+                  dlg.toast(body, { type: "warn", title: "Payment cleared by payer", duration: 6000 });
+                  try {
+                    if ("Notification" in window && Notification.permission === "granted") {
+                      const n = new Notification("Payment cleared by payer", { body, tag: `mirror-settle-clr-${tx.id}`, icon: "/favicon.ico" });
+                      n.onclick = () => { try { window.focus(); } catch { /* ignore */ } };
+                    }
+                    if ("vibrate" in navigator) navigator.vibrate([140, 60, 60]);
+                  } catch { /* ignore */ }
+                } else if (prevS && curS && prevAmtS !== curAmtS) {
+                  const body = `${merchant} · payer updated your settlement to ${formatMoneyRef.current(curAmtS)}`;
+                  dlg.toast(body, { type: "info", title: "Settlement updated", duration: 5000 });
+                }
+              }
+              mirrorSettlementRef.current[tx.id] = curS ? { ...curS } : null;
             }
 
             /* Mirror deletion detection — if a tx id we knew about is gone AND it was a
@@ -807,6 +853,9 @@ export default function App({ onReady }) {
                   notes: tx.notes || "",
                   amount: Number(tx.amount) || 0,
                 };
+                if (tx.settlement && typeof tx.settlement === "object") {
+                  mirrorSettlementRef.current[tx.id] = { ...tx.settlement };
+                }
               } else if (tx.settlements && typeof tx.settlements === "object") {
                 /* Seed peer-settlement baseline for our own (master) bills so a
                  * fresh login doesn't replay historical settlements as toasts. */
@@ -1143,6 +1192,81 @@ export default function App({ onReady }) {
     } catch (e) {
       console.error("clearSettlement failed:", e);
       notifyOp("Couldn't remove settlement", "Check your connection and try again.", { type: "error", duration: 5000 });
+    }
+  }
+
+  /**
+   * Master records that a peer has paid them back. Writes to the master's own
+   * `settlements[peerUid]` AND mirrors the same entry to the slave's copy under
+   * `settlement` so both sides stay in sync — useful when the slave can't push
+   * directly (e.g. older Firestore rules not yet deployed, or master received
+   * the cash in-person and wants to log it themselves).
+   */
+  async function recordPeerSettlement(txId, peerUid, peerName, settlement) {
+    if (!txId || !peerUid || !settlement) return;
+    if (!uidRef.current) return;
+    const entry = sanitizeForFirestore({
+      ...settlement,
+      byUid: peerUid,
+      byName: String(peerName || "").trim(),
+      recordedByMaster: true,
+    });
+    try {
+      await setDoc(
+        doc(db, "users", uidRef.current, "transactions", txId),
+        { settlements: { [peerUid]: entry } },
+        { merge: true }
+      );
+      try {
+        await setDoc(
+          doc(db, "users", peerUid, "transactions", txId),
+          { settlement: entry },
+          { merge: true }
+        );
+      } catch (slaveErr) {
+        console.warn("recordPeerSettlement: slave mirror push failed:", slaveErr);
+      }
+      const amt = Number(settlement.amount) || 0;
+      notifyOp(
+        settlement.full ? `Marked fully paid — ${peerName || "peer"}` : `Recorded payment from ${peerName || "peer"}`,
+        `${formatMoney(amt)} · ${settlement.method || "payment"}`,
+        { type: "success", tag: `settle-peer-${txId}-${peerUid}`, duration: 3500 }
+      );
+    } catch (e) {
+      console.error("recordPeerSettlement failed:", e);
+      notifyOp("Couldn't record payment", "Check your connection and try again.", { type: "error", duration: 5000 });
+    }
+  }
+
+  /**
+   * Master clears a peer's settlement slot. Removes `settlements[peerUid]`
+   * from the master's own doc and the mirrored `settlement` on the slave's
+   * doc. Peer will see a "Settlement reversed" notification via the snapshot
+   * diff (same path the slave's own clear uses).
+   */
+  async function clearPeerSettlement(txId, peerUid, peerName) {
+    if (!txId || !peerUid || !uidRef.current) return;
+    try {
+      await updateDoc(
+        doc(db, "users", uidRef.current, "transactions", txId),
+        { [`settlements.${peerUid}`]: deleteField() }
+      );
+      try {
+        await updateDoc(
+          doc(db, "users", peerUid, "transactions", txId),
+          { settlement: deleteField() }
+        );
+      } catch (slaveErr) {
+        console.warn("clearPeerSettlement: slave mirror update failed:", slaveErr);
+      }
+      notifyOp(
+        `Cleared payment${peerName ? ` — ${peerName}` : ""}`,
+        "The bill is back on your balance for that peer.",
+        { type: "info", tag: `settle-peer-clear-${txId}-${peerUid}`, duration: 3500 }
+      );
+    } catch (e) {
+      console.error("clearPeerSettlement failed:", e);
+      notifyOp("Couldn't clear payment", "Check your connection and try again.", { type: "error", duration: 5000 });
     }
   }
 
@@ -6536,6 +6660,8 @@ export default function App({ onReady }) {
         onEdit={(txId, updates) => void editTransaction(txId, updates)}
         onSettle={(txId, settlement) => void saveSettlement(txId, settlement)}
         onClearSettlement={(txId) => void clearSettlement(txId)}
+        onRecordPeerSettlement={(txId, peerUid, peerName, settlement) => void recordPeerSettlement(txId, peerUid, peerName, settlement)}
+        onClearPeerSettlement={(txId, peerUid, peerName) => void clearPeerSettlement(txId, peerUid, peerName)}
         onClose={() => setSelectedTx(null)}
         onDelete={(id) => {
           delTx(id);

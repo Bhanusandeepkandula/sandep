@@ -17,6 +17,8 @@ export function TxDetail({
   onEdit,
   onSettle,
   onClearSettlement,
+  onRecordPeerSettlement,
+  onClearPeerSettlement,
   splitContacts = [],
   onSaveSplit,
   selfProfileUuid = "",
@@ -37,11 +39,19 @@ export function TxDetail({
   const [settleAmt, setSettleAmt] = useState("");
   const [settleMethod, setSettleMethod] = useState("");
 
+  /* Master-side "record what a peer paid me" panel. Holds the target peer's
+   * uid + name + owed amount while the master is entering the details, then
+   * clears back to null once saved or cancelled. */
+  const [peerSettle, setPeerSettle] = useState(null); // { uid, name, owed }
+  const [peerSettleAmt, setPeerSettleAmt] = useState("");
+  const [peerSettleMethod, setPeerSettleMethod] = useState("");
+
   const dlg = useDialog();
 
   useEffect(() => {
     setEditing(false); setEditDraft(null); setSplitEditing(false);
     setSettleOpen(false); setSettleAmt(""); setSettleMethod("");
+    setPeerSettle(null); setPeerSettleAmt(""); setPeerSettleMethod("");
   }, [tx?.id]);
 
   function startEdit() {
@@ -429,40 +439,162 @@ export function TxDetail({
                         const paidBack = peerSettlement ? (parseFloat(String(peerSettlement.amount)) || 0) : 0;
                         const owedAmt = (parseFloat(String(p.a)) || 0);
                         const peerFullySettled = paidBack > 0 && paidBack >= owedAmt - 0.005;
+                        const canRecord = !isMirror && !!p?.fuid && !!onRecordPeerSettlement;
+                        const canClear = !isMirror && !!p?.fuid && !!onClearPeerSettlement && paidBack > 0;
                         return (
-                        <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
-                            <Users size={12} color={T.sub} /> {p.n}
-                            {peerFullySettled ? (
-                              <BadgeCheck size={11} color={T.grn || "#22c55e"} />
-                            ) : null}
-                          </span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {paidBack > 0 && !peerFullySettled ? (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e" }} title={`Paid back ${formatMoney(paidBack)}`}>
-                                -{formatMoney(paidBack)}
-                              </span>
-                            ) : null}
-                            <span style={{ fontSize: 13, fontWeight: 700, textDecoration: peerFullySettled ? "line-through" : "none", color: peerFullySettled ? T.sub : T.txt }}>
-                              {formatMoney(p.a)}
+                        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+                              <Users size={12} color={T.sub} /> {p.n}
+                              {peerFullySettled ? (
+                                <BadgeCheck size={11} color={T.grn || "#22c55e"} />
+                              ) : null}
                             </span>
-                            {canEditSplit && (
-                              <button type="button"
-                                onClick={() => {
-                                  const remaining = peopleSafe.filter((x) => x.n !== p.n);
-                                  const type = tx.split?.type || "equal";
-                                  const adjusted = type === "equal" && txAmt > 0 && remaining.length > 0
-                                    ? remaining.map((x) => ({ ...x, a: Math.round((txAmt / (remaining.length + 1)) * 100) / 100 }))
-                                    : remaining;
-                                  onSaveSplit?.(tx.id, adjusted.length ? { type, people: adjusted } : null);
-                                  dlg.toast(`${p.n} removed. Amounts adjusted.`, { type: "info", duration: 2500 });
-                                }}
-                                title={`Remove ${p.n} from split`}
-                                style={{ background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, borderRadius: 6, padding: "2px 6px", cursor: "pointer", fontSize: 11, fontWeight: 600, lineHeight: 1 }}>
-                                ✕
-                              </button>
-                            )}
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              {paidBack > 0 && !peerFullySettled ? (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e" }} title={`Paid back ${formatMoney(paidBack)}`}>
+                                  -{formatMoney(paidBack)}
+                                </span>
+                              ) : null}
+                              <span style={{ fontSize: 13, fontWeight: 700, textDecoration: peerFullySettled ? "line-through" : "none", color: peerFullySettled ? T.sub : T.txt }}>
+                                {formatMoney(p.a)}
+                              </span>
+                              {canEditSplit && (
+                                <button type="button"
+                                  onClick={() => {
+                                    const remaining = peopleSafe.filter((x) => x.n !== p.n);
+                                    const type = tx.split?.type || "equal";
+                                    const adjusted = type === "equal" && txAmt > 0 && remaining.length > 0
+                                      ? remaining.map((x) => ({ ...x, a: Math.round((txAmt / (remaining.length + 1)) * 100) / 100 }))
+                                      : remaining;
+                                    onSaveSplit?.(tx.id, adjusted.length ? { type, people: adjusted } : null);
+                                    dlg.toast(`${p.n} removed. Amounts adjusted.`, { type: "info", duration: 2500 });
+                                  }}
+                                  title={`Remove ${p.n} from split`}
+                                  style={{ background: T.ddim, border: `1px solid ${T.dng}44`, color: T.dng, borderRadius: 6, padding: "2px 6px", cursor: "pointer", fontSize: 11, fontWeight: 600, lineHeight: 1 }}>
+                                  ✕
+                                </button>
+                              )}
+                            </div>
                           </div>
+                          {/* Master-side: record / clear this peer's settlement */}
+                          {(canRecord || canClear) && (peerSettle?.uid !== p.fuid) && (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: 18 }}>
+                              {canRecord && !peerFullySettled ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const remaining = Math.max(0, owedAmt - paidBack);
+                                    setPeerSettle({ uid: p.fuid, name: p.n, owed: owedAmt, already: paidBack });
+                                    setPeerSettleAmt(String(remaining || owedAmt));
+                                    setPeerSettleMethod(payments[0] || "");
+                                  }}
+                                  style={{ background: T.adim, border: `1px solid ${T.acc}55`, color: T.acc, borderRadius: 8, padding: "3px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                                >
+                                  <Wallet size={11} /> {paidBack > 0 ? "Update payment" : "Mark paid"}
+                                </button>
+                              ) : null}
+                              {canClear ? (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const ok = await dlg.confirm(
+                                      `Clear the ${formatMoney(paidBack)} payment recorded for ${p.n}? This will add the amount back to your balance and notify ${p.n}.`,
+                                      {
+                                        title: "Clear peer payment?",
+                                        confirmLabel: "Clear",
+                                        cancelLabel: "Keep",
+                                        danger: true,
+                                        type: "warn",
+                                      }
+                                    );
+                                    if (ok) onClearPeerSettlement?.(tx.id, p.fuid, p.n);
+                                  }}
+                                  style={{ background: T.ddim, border: `1px solid ${T.dng}55`, color: T.dng, borderRadius: 8, padding: "3px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                                >
+                                  <Trash2 size={11} /> Clear
+                                </button>
+                              ) : null}
+                            </div>
+                          )}
+                          {/* Inline editor for recording this peer's payment */}
+                          {peerSettle?.uid === p.fuid && (
+                            <div style={{ marginLeft: 18, background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, padding: 10 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700 }}>
+                                  Payment from {p.n}
+                                </div>
+                                <button type="button" onClick={() => { setPeerSettle(null); setPeerSettleAmt(""); setPeerSettleMethod(""); }}
+                                  style={{ background: "transparent", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}>
+                                  <X size={13} />
+                                </button>
+                              </div>
+                              <div style={{ fontSize: 10, color: T.sub, marginBottom: 8 }}>
+                                Owes {formatMoney(owedAmt)}{paidBack > 0 ? ` · already paid ${formatMoney(paidBack)}` : ""}
+                              </div>
+                              <input
+                                type="number" inputMode="decimal"
+                                placeholder={`Amount (max ${formatMoney(owedAmt)})`}
+                                value={peerSettleAmt}
+                                onChange={(e) => setPeerSettleAmt(e.target.value)}
+                                style={{ ...inp, fontSize: 14, marginBottom: 8, padding: "8px 10px" }}
+                              />
+                              {(payments || []).length > 0 ? (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                                  {payments.slice(0, 4).map((pm) => (
+                                    <button
+                                      key={pm}
+                                      type="button"
+                                      onClick={() => setPeerSettleMethod(pm)}
+                                      style={{
+                                        padding: "5px 10px", borderRadius: 8,
+                                        border: peerSettleMethod === pm ? `1.5px solid ${T.acc}` : `1px solid ${T.bdr}`,
+                                        background: peerSettleMethod === pm ? T.adim : "transparent",
+                                        color: peerSettleMethod === pm ? T.acc : T.sub,
+                                        fontSize: 11, fontWeight: peerSettleMethod === pm ? 700 : 400, cursor: "pointer",
+                                      }}
+                                    >
+                                      {pm}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+                              <button
+                                type="button"
+                                disabled={!peerSettleAmt || !peerSettleMethod || !(parseFloat(peerSettleAmt) > 0)}
+                                onClick={() => {
+                                  const amt = parseFloat(peerSettleAmt);
+                                  if (!Number.isFinite(amt) || amt <= 0) {
+                                    dlg.toast("Enter a valid amount", { type: "warn" }); return;
+                                  }
+                                  if (!peerSettleMethod) {
+                                    dlg.toast("Pick a payment method", { type: "warn" }); return;
+                                  }
+                                  const full = amt >= owedAmt - 0.01;
+                                  onRecordPeerSettlement?.(tx.id, p.fuid, p.n, {
+                                    amount: amt,
+                                    method: peerSettleMethod,
+                                    settledAt: new Date().toISOString(),
+                                    full,
+                                  });
+                                  setPeerSettle(null);
+                                  setPeerSettleAmt("");
+                                  setPeerSettleMethod("");
+                                  dlg.toast(full ? `${p.n} marked as fully paid` : `${formatMoney(amt)} recorded from ${p.n}`, { type: "success", duration: 3000 });
+                                }}
+                                style={{
+                                  width: "100%", padding: 9, borderRadius: 10, border: "none",
+                                  background: peerSettleAmt && peerSettleMethod && parseFloat(peerSettleAmt) > 0 ? T.acc : T.mut,
+                                  color: peerSettleAmt && peerSettleMethod && parseFloat(peerSettleAmt) > 0 ? T.btnTxt : T.sub,
+                                  fontSize: 12, fontWeight: 800,
+                                  cursor: peerSettleAmt && peerSettleMethod && parseFloat(peerSettleAmt) > 0 ? "pointer" : "not-allowed",
+                                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                                }}
+                              >
+                                <Check size={13} /> Record payment
+                              </button>
+                            </div>
+                          )}
                         </div>
                         );
                       })}

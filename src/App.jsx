@@ -53,7 +53,7 @@ import { uploadReceiptImage } from "./receiptUpload.js";
 import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 import { extractTextFromFile } from "./docExtract.js";
 
-const API = `${import.meta.env.BASE_URL}anthropic/v1/messages`;
+const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 
 function sanitizeForFirestore(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -662,196 +662,169 @@ export default function App() {
     const input = e.target;
     const f = input.files?.[0];
     if (!f) return;
-    const lowerEarly = f.name?.toLowerCase() || "";
-    const mtEarly =
-      f.type && f.type.length > 0 ? f.type : lowerEarly.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
-    scanPhaseOrderRef.current = canRunBrowserOcr(mtEarly, isStatement)
-      ? ["read", "ocr", "ai", "parse"]
-      : ["read", "ai", "parse"];
+
+    const openAiKey = String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+    if (!openAiKey) {
+      setScanErr("OpenAI key not configured. Add VITE_OPENAI_API_KEY to GitHub secrets and redeploy.");
+      return;
+    }
+
+    const lowerName = f.name?.toLowerCase() || "";
+    const mt = f.type && f.type.length > 0 ? f.type : lowerName.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
+    const isImageFile = mt.startsWith("image/") || (!mt.includes("pdf") && !mt.includes("spreadsheet") && !mt.includes("excel") && !lowerName.match(/\.(xlsx?|ods|csv)$/));
+
     scanCancelledRef.current = false;
     scanFetchAbortRef.current?.abort();
     scanFetchAbortRef.current = new AbortController();
     const fetchSignal = scanFetchAbortRef.current.signal;
     if ("Notification" in window && Notification.permission === "default") {
-      try {
-        void Notification.requestPermission();
-      } catch {
-        /* ignore */
-      }
+      try { void Notification.requestPermission(); } catch { /* ignore */ }
     }
+
     setScanErr("");
     setScanPhase("read");
     setStep("processing");
-    const reader = new FileReader();
-    reader.onerror = () => {
-      setScanErr("Could not read this file from your device.");
-      setScanPhase(null);
-      setStep("form");
-      input.value = "";
-      scanFetchAbortRef.current = null;
-    };
-    reader.onload = async (ev) => {
-      try {
-        if (scanCancelledRef.current) return;
-        const raw = ev.target.result;
-        if (typeof raw !== "string" || !raw.includes(",")) {
-          setScanErr("Could not read file as image or PDF.");
-          setScanPhase(null);
-          setStep("form");
-          return;
-        }
-        const b64 = raw.split(",")[1];
-        if (!isStatement) setPreviewImg(raw);
 
-        let ocrSnippet = "";
-        if (scanPhaseOrderRef.current.includes("ocr")) {
-          setScanPhase("ocr");
-          if (!scanCancelledRef.current) {
-            try {
-              ocrSnippet = await extractReceiptTextWithOcr(raw);
-            } catch (ocrErr) {
-              console.warn("Tesseract OCR failed", ocrErr);
-            }
-          }
-        }
+    try {
+      const cats = catalogRef.current.categories || [];
+      const catNames = cats.map((c) => c.n).filter(Boolean);
+      const payNames = (catalogRef.current.payments || []).filter(Boolean);
+      const catList = catNames.length ? catNames.join(", ") : "Food, Travel, Shopping, Bills";
+      const payList = payNames.length ? payNames.join(", ") : "Cash, Card, UPI";
+
+      // ── Statements (PDF / Excel): extract text → OpenAI → CSV import ──────
+      if (isStatement) {
+        scanPhaseOrderRef.current = ["read", "ocr", "ai", "parse"];
+        setScanPhase("ocr");
+        const text = await extractTextFromFile(f);
         if (scanCancelledRef.current) return;
 
         setScanPhase("ai");
-
-        const cats = catalogRef.current.categories || [];
-        const catNames = cats.map((c) => c.n).filter(Boolean);
-        const payNames = (catalogRef.current.payments || []).filter(Boolean);
-        const catList = catNames.length ? catNames.join(", ") : "Food, Travel, Shopping, Bills (match your app)";
-        const payList = payNames.length ? payNames.join(", ") : "Cash, Card, UPI";
-
-        const lower = f.name?.toLowerCase() || "";
-        const mediaType =
-          f.type && f.type.length > 0 ? f.type : lower.endsWith(".pdf") ? "application/pdf" : "image/jpeg";
-
+        const csv = await convertOcrToCsv(text, { categories: catNames, payments: payNames });
         if (scanCancelledRef.current) return;
 
-        const r = await fetch(API, {
-          signal: fetchSignal,
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1400,
-            system: `You extract structured expense data from receipt or bank-statement images. Return ONLY one JSON object — no markdown, no commentary before or after.
-
-The JSON must include:
-- total (number): final payable amount (Grand Total / TOTAL / Net Payable / Amount Due). If only line rows are printed with no total, set total to the sum of line_items amounts.
-- amount (number): same numeric value as total.
-- category (string): EXACTLY one label from this list (copy spelling): ${catList}
-- date (string): YYYY-MM-DD
-- notes (string): merchant name or short description
-- payment (string, optional): best match from: ${payList}
-- line_items (optional): array of { "name": string, "amount": number } for each printed line
-
-Use plain numbers for amounts (no currency symbols inside JSON). Never invent a category not in the list.`,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "image",
-                    source: {
-                      type: "base64",
-                      media_type: mediaType,
-                      data: b64,
-                    },
-                  },
-                  {
-                    type: "text",
-                    text: `${
-                      ocrSnippet
-                        ? `Raw text from on-device Tesseract OCR (same engine as desktop tools like Textemage; line breaks may be wrong — use the image as source of truth):\n${ocrSnippet}\n\n`
-                        : ""
-                    }Analyze this ${isStatement ? "bank or card statement" : "receipt or bill image"} and return only the JSON object.`,
-                  },
-                ],
-              },
-            ],
-          }),
-        });
-        if (scanCancelledRef.current) return;
-        const bodyText = await r.text();
-        let d = {};
-        try {
-          d = JSON.parse(bodyText);
-        } catch {
-          /* ignore */
-        }
-        if (!r.ok) {
-          const rawErr =
-            d.error?.message ||
-            (bodyText.length > 180 ? `${bodyText.slice(0, 180)}…` : bodyText) ||
-            `Scan request failed (${r.status}).`;
-          const needsKey =
-            typeof rawErr === "string" &&
-            (rawErr.toLowerCase().includes("x-api-key") || rawErr.toLowerCase().includes("api key"));
-          setScanErr(
-            needsKey
-              ? `Anthropic key missing: ${rawErr.trim()} In the project folder, create or edit .env.local with ANTHROPIC_API_KEY=your_key (from console.anthropic.com), save, then stop and restart npm run dev. Deployed sites need a backend proxy; local dev uses Vite only.`
-              : `${rawErr} For scans, set ANTHROPIC_API_KEY in .env.local and use npm run dev.`
-          );
+        setScanPhase("parse");
+        const { rows, fatal } = parseExpenseCsv(csv, { categories: catNames, payments: payNames });
+        if (fatal || rows.filter((r) => r.ok).length === 0) {
+          setScanErr("Could not extract transactions from this file. Try OCR → CSV for manual review.");
           setScanPhase(null);
           setStep("form");
           return;
         }
-        if (scanCancelledRef.current) return;
-        setScanPhase("parse");
-        let txt = "";
-        for (const block of d.content || []) {
-          if (block && block.type === "text" && block.text) txt += block.text;
-        }
-        const rawJson = extractExpenseJson(txt || "{}");
-        const normalized = normalizeScanResult(rawJson, {
-          categoryNames: catNames,
-          payments: payNames,
-          defaultPayment: payNames[0] || "",
-          defaultDate: tdStr(),
-        });
-        const items = Array.isArray(normalized.lineItems) ? normalized.lineItems.slice(0, 50) : [];
-        setScanLineItems(items.length ? items : null);
-        setForm((p) => ({
-          ...p,
-          amount: normalized.amount,
-          category: normalized.category,
-          date: normalized.date || tdStr(),
-          payment: normalized.payment || p.payment || payNames[0] || "",
-          notes: normalized.notes || p.notes,
-        }));
-        if (!normalized.amount || parseFloat(normalized.amount) <= 0) {
-          setScanErr(
-            "Could not read a clear total from this image. Enter the amount manually, or try a clearer photo."
-          );
-        } else {
-          setScanErr("");
-        }
-        notifyScanReadyIfBackground();
+        setImportBundle({ fileName: f.name, rows });
+        setAddMode("import");
         setScanPhase(null);
-        setStep("form");
-      } catch (err) {
-        const aborted = err?.name === "AbortError" || scanCancelledRef.current;
-        if (aborted) {
-          setScanPhase(null);
-          return;
-        }
-        console.error(err);
-        setScanErr(err instanceof Error ? err.message : "Scan failed. Check network and API setup.");
-        setScanPhase(null);
-        setStep("form");
-      } finally {
-        try {
-          input.value = "";
-        } catch {
-          /* ignore */
-        }
-        scanFetchAbortRef.current = null;
+        setStep("importPreview");
+        return;
       }
-    };
-    reader.readAsDataURL(f);
+
+      // ── Receipt scan: image → OpenAI Vision; PDF → text → OpenAI ──────────
+      let userContent;
+
+      if (isImageFile) {
+        // Read as data URL for vision API
+        const raw = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(/** @type {string} */ (reader.result));
+          reader.onerror = () => reject(new Error("Could not read file from device."));
+          reader.readAsDataURL(f);
+        });
+        setPreviewImg(raw);
+
+        // Tesseract OCR in parallel — helps with low-res images
+        let ocrText = "";
+        if (canRunBrowserOcr(mt, false)) {
+          scanPhaseOrderRef.current = ["read", "ocr", "ai", "parse"];
+          setScanPhase("ocr");
+          try { ocrText = await extractReceiptTextWithOcr(raw); } catch { /* ignore */ }
+        } else {
+          scanPhaseOrderRef.current = ["read", "ai", "parse"];
+        }
+        if (scanCancelledRef.current) return;
+
+        userContent = [
+          { type: "image_url", image_url: { url: raw, detail: "low" } },
+          {
+            type: "text",
+            text: `${ocrText ? `OCR text (use as hint only): ${ocrText}\n\n` : ""}Extract expense from this receipt. Return ONLY JSON:\n{"total":number,"category":"from list","date":"YYYY-MM-DD","notes":"merchant name","payment":"from list","line_items":[{"name":"string","amount":number}]}\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.`,
+          },
+        ];
+      } else {
+        // PDF receipt: extract text first, then send as text to OpenAI
+        scanPhaseOrderRef.current = ["read", "ocr", "ai", "parse"];
+        setScanPhase("ocr");
+        const text = await extractTextFromFile(f);
+        if (scanCancelledRef.current) return;
+
+        userContent = `Extract the main expense from this receipt text. Return ONLY JSON:\n{"total":number,"category":"from list","date":"YYYY-MM-DD","notes":"merchant name","payment":"from list","line_items":[{"name":"string","amount":number}]}\nCategories: ${catList}\nPayments: ${payList}\nUse plain numbers, no currency symbols.\n\nReceipt text:\n${text}`;
+      }
+
+      setScanPhase("ai");
+      if (scanCancelledRef.current) return;
+
+      const r = await fetch(OPENAI_API, {
+        signal: fetchSignal,
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          max_tokens: 1000,
+          temperature: 0,
+          messages: [
+            { role: "system", content: "You extract structured expense data from receipts. Return ONLY valid JSON, no markdown, no extra text." },
+            { role: "user", content: userContent },
+          ],
+        }),
+      });
+
+      if (scanCancelledRef.current) return;
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d?.error?.message || `OpenAI error (${r.status})`;
+        setScanErr(r.status === 401 ? "Invalid OpenAI API key. Check VITE_OPENAI_API_KEY." : r.status === 429 ? "OpenAI rate limit hit — wait a moment and retry." : msg);
+        setScanPhase(null);
+        setStep("form");
+        return;
+      }
+
+      setScanPhase("parse");
+      const txt = String(d?.choices?.[0]?.message?.content || "{}");
+      const rawJson = extractExpenseJson(txt);
+      const normalized = normalizeScanResult(rawJson, {
+        categoryNames: catNames,
+        payments: payNames,
+        defaultPayment: payNames[0] || "",
+        defaultDate: tdStr(),
+      });
+
+      const items = Array.isArray(normalized.lineItems) ? normalized.lineItems.slice(0, 50) : [];
+      setScanLineItems(items.length ? items : null);
+      setForm((p) => ({
+        ...p,
+        amount: normalized.amount,
+        category: normalized.category,
+        date: normalized.date || tdStr(),
+        payment: normalized.payment || p.payment || payNames[0] || "",
+        notes: normalized.notes || p.notes,
+      }));
+      if (!normalized.amount || parseFloat(normalized.amount) <= 0) {
+        setScanErr("Could not read a clear total. Enter the amount manually or try a clearer photo.");
+      } else {
+        setScanErr("");
+      }
+      notifyScanReadyIfBackground();
+      setScanPhase(null);
+      setStep("form");
+    } catch (err) {
+      if (err?.name === "AbortError" || scanCancelledRef.current) { setScanPhase(null); return; }
+      console.error(err);
+      setScanErr(err instanceof Error ? err.message : "Scan failed. Check your connection and try again.");
+      setScanPhase(null);
+      setStep("form");
+    } finally {
+      try { input.value = ""; } catch { /* ignore */ }
+      scanFetchAbortRef.current = null;
+    }
   }
 
   function processCsvFile(e) {

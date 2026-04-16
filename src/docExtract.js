@@ -15,16 +15,27 @@ export async function extractTextFromFile(file, onProgress) {
   const mt = (file.type || "").toLowerCase();
   const name = (file.name || "").toLowerCase();
 
+  if (isHeic(mt, name)) {
+    throw new Error("HEIC/HEIF images are not supported. Please convert to JPG or PNG first.");
+  }
+  if (!isSupportedType(mt, name)) {
+    throw new Error(
+      `Unsupported file type: ${file.name}. Supported: JPG, PNG, WebP, PDF, XLSX, XLS, ODS, CSV.`
+    );
+  }
   if (isPdf(mt, name)) return extractPdf(file, onProgress);
   if (isSpreadsheet(mt, name)) return extractSpreadsheet(file);
-  // Default: treat as image and run Tesseract
   return extractImage(file, onProgress);
 }
 
-// ─── Type helpers ────────────────────────────────────────────────────────────
+// ─── Type helpers ─────────────────────────────────────────────────────────────
 
 function isPdf(mt, name) {
   return mt.includes("pdf") || name.endsWith(".pdf");
+}
+
+function isHeic(mt, name) {
+  return mt.includes("heic") || mt.includes("heif") || name.endsWith(".heic") || name.endsWith(".heif");
 }
 
 function isSpreadsheet(mt, name) {
@@ -32,13 +43,26 @@ function isSpreadsheet(mt, name) {
     mt.includes("spreadsheetml") ||
     mt.includes("excel") ||
     mt.includes("vnd.ms-excel") ||
-    mt.includes("opendocument.spreadsheet")
+    mt.includes("opendocument.spreadsheet") ||
+    mt.includes("text/csv") ||
+    mt.includes("text/plain")
   )
     return true;
-  return [".xlsx", ".xls", ".ods"].some((ext) => name.endsWith(ext));
+  return [".xlsx", ".xls", ".ods", ".csv"].some((ext) => name.endsWith(ext));
 }
 
-// ─── Image → Tesseract ───────────────────────────────────────────────────────
+function isImage(mt, name) {
+  if (mt.startsWith("image/")) return true;
+  return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif"].some((ext) =>
+    name.endsWith(ext)
+  );
+}
+
+function isSupportedType(mt, name) {
+  return isPdf(mt, name) || isSpreadsheet(mt, name) || isImage(mt, name);
+}
+
+// ─── Image → Tesseract ────────────────────────────────────────────────────────
 
 async function extractImage(file, onProgress) {
   const { extractReceiptTextWithOcr } = await import("./receiptOcr.js");
@@ -46,17 +70,15 @@ async function extractImage(file, onProgress) {
   return extractReceiptTextWithOcr(dataUrl, onProgress);
 }
 
-// ─── PDF → PDF.js ────────────────────────────────────────────────────────────
+// ─── PDF → PDF.js ─────────────────────────────────────────────────────────────
 
 async function extractPdf(file, onProgress) {
   const buf = await file.arrayBuffer();
-
-  // Lazy-load pdfjs-dist so it only enters the bundle when needed
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Use the bundled legacy worker via a CDN URL so Vite doesn't need to
-  // special-case the worker file (avoids the "worker not found" Vite issue).
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  // Use unpkg which mirrors npm exactly — pdfjs-dist v5+ uses .mjs workers
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
   const totalPages = pdf.numPages;
@@ -74,12 +96,17 @@ async function extractPdf(file, onProgress) {
     onProgress?.(i / totalPages);
   }
 
+  if (pageTexts.length === 0) {
+    throw new Error(
+      "No text found in this PDF. It may be a scanned image-only PDF — try converting to JPG and uploading the image instead."
+    );
+  }
+
   const full = pageTexts.join("\n---\n").trim();
-  // Cap at 14 000 chars to stay within OpenAI context limits
   return full.length > 14000 ? full.slice(0, 14000) : full;
 }
 
-// ─── Spreadsheet → SheetJS ───────────────────────────────────────────────────
+// ─── Spreadsheet → SheetJS ────────────────────────────────────────────────────
 
 async function extractSpreadsheet(file) {
   const buf = await file.arrayBuffer();
@@ -90,12 +117,16 @@ async function extractSpreadsheet(file) {
   if (!sheetName) throw new Error("No sheets found in this file.");
 
   const sheet = workbook.Sheets[sheetName];
-  // sheet_to_csv gives us a clean tabular text that OpenAI handles very well
   const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+
+  if (!csv.trim()) {
+    throw new Error("The spreadsheet appears to be empty. Check the file and try again.");
+  }
+
   return csv.length > 14000 ? csv.slice(0, 14000) : csv;
 }
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
+// ─── Utility ──────────────────────────────────────────────────────────────────
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {

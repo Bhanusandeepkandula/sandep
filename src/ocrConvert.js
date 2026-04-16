@@ -75,7 +75,7 @@ function fixCatalogColumns(csv, categories, payments) {
   return fixed.join("\n");
 }
 
-/** Minimal CSV row parser — handles double-quoted fields. */
+/** Minimal CSV row parser — handles double-quoted fields and escaped quotes (""). */
 function parseRow(line) {
   const cells = [];
   let cur = "";
@@ -83,7 +83,12 @@ function parseRow(line) {
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
-      inQ = !inQ;
+      if (inQ && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQ = !inQ;
+      }
     } else if (ch === "," && !inQ) {
       cells.push(cur.trim());
       cur = "";

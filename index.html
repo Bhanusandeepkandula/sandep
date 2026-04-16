@@ -6,24 +6,33 @@
     <meta name="theme-color" content="#08080F" />
     <title>Smart Expense Tracker</title>
     <style>
+      /* Lock viewport height — only inner main scrolls; body must not scroll or fixed nav “moves” with the page */
       html {
         -webkit-text-size-adjust: 100%;
         background: #08080f;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
       body {
         margin: 0;
         background: #08080f;
-        min-height: 100%;
+        height: 100%;
         min-height: 100dvh;
         min-height: -webkit-fill-available;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
       #root {
-        min-height: 100%;
+        height: 100%;
         min-height: 100dvh;
         min-height: -webkit-fill-available;
+        max-height: 100dvh;
+        max-height: -webkit-fill-available;
         display: flex;
         flex-direction: column;
         width: 100%;
+        overflow: hidden;
         background: #08080f;
       }
     </style>

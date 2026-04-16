@@ -1020,6 +1020,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
           maxWidth: maxShell,
           alignSelf: "center",
           minHeight: 0,
+          height: "100%",
           paddingLeft: px,
           paddingRight: px,
           boxSizing: "border-box",
@@ -1051,6 +1052,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        height: "100%",
         width: "100%",
         maxWidth: maxShell,
         alignSelf: "center",
@@ -1059,6 +1061,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
         boxSizing: "border-box",
         fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
         position: "relative",
+        overflow: "hidden",
       }}
     >
       <style>{`
@@ -1166,6 +1169,7 @@ Use plain numbers for amounts (no currency symbols inside JSON). Never invent a 
           overflowX: "hidden",
           paddingTop: safeTop,
           WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
         }}
       >
         {tab === "home" && (

@@ -135,10 +135,10 @@ export function normalizeScanResult(raw, ctx) {
   }
   const category = categoryMissing ? "" : matchedCat || (categoryNames[0] ?? "");
 
-  const payRaw = rawObj.payment;
+  const payRaw = rawObj.payment ?? rawObj.payment_hint;
   let matchedPay = null;
-  if (!paymentMissing && typeof payRaw === "string" && payRaw.trim()) {
-    matchedPay = matchCatalogName(payRaw, payments);
+  if (!paymentMissing && payRaw != null && String(payRaw).trim() && String(payRaw).trim() !== "null") {
+    matchedPay = matchCatalogName(String(payRaw).trim(), payments);
   }
   const payment = paymentMissing ? "" : matchedPay || defaultPayment || (payments[0] ?? "");
 
@@ -223,8 +223,13 @@ export function buildImportRowsFromVisionTransactions(txs, ctx) {
       (notes ? matchCatalogName(notes, categories) : null) ??
       (categories[0] || null);
 
-    const payHint = String(o.payment ?? o.payment_hint ?? "").trim();
-    const pay = payHint ? matchCatalogName(payHint, payments) : defaultPay;
+    const payRaw = o.payment ?? o.payment_hint;
+    const payHint = payRaw != null ? String(payRaw).trim() : "";
+    let pay = defaultPay;
+    if (payHint && payHint !== "null") {
+      const matched = matchCatalogName(payHint, payments);
+      if (matched) pay = matched;
+    }
 
     let error = "";
     if (!Number.isFinite(amount) || amount <= 0) {

@@ -251,6 +251,7 @@ export default function App({ onReady }) {
   const [insightHomeDismissRev, setInsightHomeDismissRev] = useState(0);
 
   const [showBM, setShowBM] = useState(false);
+  const [budgetSubTab, setBudgetSubTab] = useState("budgets");
   const [bmCat, setBmCat] = useState("");
   const [bmAmt, setBmAmt] = useState("");
   /** Overall monthly spending cap (optional, no category). Synced as `monthlyBudgetTotal` in Firestore. */
@@ -812,6 +813,18 @@ export default function App({ onReady }) {
       .map(([n, v]) => ({ name: n, value: v, ...getCat(categories, n) }))
       .sort((a, b) => b.value - a.value);
   }, [filtered, categories]);
+
+  const PAY_COLORS = ["#60A5FA", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6", "#22D3EE", "#FB923C", "#94A3B8"];
+  const paymentBreakdown = useMemo(() => {
+    const m = {};
+    filtered.forEach((tx) => {
+      const p = tx.payment || "Unknown";
+      m[p] = (m[p] || 0) + tx.amount;
+    });
+    return Object.entries(m)
+      .map(([name, value], i) => ({ name, value, c: PAY_COLORS[i % PAY_COLORS.length] }))
+      .sort((a, b) => b.value - a.value);
+  }, [filtered]);
 
   const dailyData = useMemo(() => {
     const loc = (dateLocale && String(dateLocale).trim()) || (locale && String(locale).trim()) || undefined;
@@ -2699,23 +2712,12 @@ export default function App({ onReady }) {
                     <span style={{ color: T.mut, fontSize: 18 }}>{opt.comingSoon ? "—" : "›"}</span>
                   </div>
                 ))}
-                <input ref={stmtRef} type="file" accept="image/*,.pdf,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
-                <input
-                  ref={csvRef}
-                  type="file"
-                  accept=".csv,text/csv,text/plain"
-                  style={{ display: "none" }}
-                  onChange={(e) => processCsvFile(e)}
-                />
-                <input
-                  ref={ocrCsvImgRef}
-                  type="file"
-                  accept="image/*,application/pdf,.pdf,.xlsx,.xls,.ods"
-                  style={{ display: "none" }}
-                  onChange={(e) => void fillOcrFromImageFile(e)}
-                />
               </div>
             )}
+            {/* Hidden file inputs — always mounted while tab=add so refs work in any step */}
+            <input ref={stmtRef} type="file" accept="image/*,.pdf,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
+            <input ref={csvRef} type="file" accept=".csv,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => processCsvFile(e)} />
+            <input ref={ocrCsvImgRef} type="file" accept="image/*,application/pdf,.pdf,.xlsx,.xls,.ods" style={{ display: "none" }} onChange={(e) => void fillOcrFromImageFile(e)} />
 
             {step === "scanSource" && (
               <div style={{ padding: `0 ${px}px`, paddingBottom: `max(28px, calc(16px + env(safe-area-inset-bottom, 0px)))` }}>
@@ -3811,6 +3813,32 @@ export default function App({ onReady }) {
               </div>
             )}
 
+            {paymentBreakdown.length > 0 && (
+              <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Payment Methods</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <ResponsiveContainer width={120} height={120}>
+                    <PieChart>
+                      <Pie data={paymentBreakdown} cx="50%" cy="50%" innerRadius={32} outerRadius={52} paddingAngle={3} dataKey="value" stroke="none">
+                        {paymentBreakdown.map((e, i) => (
+                          <Cell key={i} fill={e.c} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ flex: 1 }}>
+                    {paymentBreakdown.map((b, i) => (
+                      <div key={b.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={{ padding: `0 ${px}px 16px` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
@@ -3883,177 +3911,43 @@ export default function App({ onReady }) {
         )}
         {tab === "budgets" && !(fbStatus === "loading" && txs.length === 0) && (
           <div>
-            <div style={{ padding: `${px + 8}px ${px}px` }}>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 10,
-                  marginBottom: 6,
-                }}
-              >
-                <div style={{ fontSize: 20, fontWeight: 800 }}>Budgets</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  {Object.keys(budgets).length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => void clearAllBudgets()}
-                      disabled={fbStatus !== "ready"}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "8px 14px",
-                        borderRadius: 10,
-                        border: `1px solid rgba(239,68,68,0.45)`,
-                        background: T.ddim,
-                        color: T.dng,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: fbStatus !== "ready" ? "not-allowed" : "pointer",
-                        opacity: fbStatus !== "ready" ? 0.5 : 1,
-                      }}
-                    >
-                      <Trash2 size={14} />
-                      Clear all
-                    </button>
-                  ) : null}
+            {/* ─── Header + Sub-tabs ─── */}
+            <div style={{ padding: `${px + 8}px ${px}px 0` }}>
+              <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 12 }}>Budgets</div>
+              <div style={{ display: "flex", gap: 0, marginBottom: 14, background: T.card2, borderRadius: 12, padding: 3 }}>
+                {[
+                  { id: "budgets", label: "Category Budgets", Icon: Target },
+                  { id: "fixed", label: "Fixed Expenses", Icon: Lock },
+                ].map((st) => (
                   <button
+                    key={st.id}
                     type="button"
-                    onClick={() => {
-                      setBmCat("");
-                      setBmAmt("");
-                      setShowBM(true);
-                    }}
+                    onClick={() => setBudgetSubTab(st.id)}
                     style={{
+                      flex: 1,
+                      padding: "10px 8px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: budgetSubTab === st.id ? T.card : "transparent",
+                      color: budgetSubTab === st.id ? T.txt : T.sub,
+                      fontSize: 13,
+                      fontWeight: budgetSubTab === st.id ? 700 : 500,
+                      cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
+                      justifyContent: "center",
                       gap: 6,
-                      padding: "8px 16px",
-                      borderRadius: 10,
-                      background: T.acc,
-                      border: "none",
-                      color: "#000",
-                      fontSize: 13,
-                      fontWeight: 700,
-                      cursor: "pointer",
+                      transition: "all .15s",
                     }}
                   >
-                    + Set budget
+                    <st.Icon size={14} color={budgetSubTab === st.id ? (st.id === "fixed" ? T.purp : T.acc) : T.sub} />
+                    {st.label}
                   </button>
-                </div>
-              </div>
-              <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.45 }}>
-                Monthly limits for this month’s spending.{" "}
-                {Object.keys(budgets).length > 0 ? (
-                  <>
-                    <strong style={{ color: T.txt }}>{Object.keys(budgets).length}</strong> categor
-                    {Object.keys(budgets).length === 1 ? "y" : "ies"} with a limit
-                    {budgetEntriesSorted.some(([c, l]) => (catSpent[c] || 0) > l) ? (
-                      <span style={{ color: T.warn }}> · Some are over limit</span>
-                    ) : null}
-                    .
-                  </>
-                ) : monthlyBudgetTotal ? (
-                  "Add optional per-category limits below, or use only your overall cap (ring on Home)."
-                ) : (
-                  "Set an overall monthly cap (no category required) and/or limits per category — the cap appears on Home as a ring next to “This Month”."
-                )}
+                ))}
               </div>
             </div>
 
-            <div style={{ margin: `0 ${px}px 14px` }}>
-              {monthlyBudgetTotal != null && monthlyBudgetTotal > 0 ? (
-                <div
-                  style={{
-                    ...card,
-                    marginBottom: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div style={{ lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
-                    <Target size={26} color={T.acc} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 140 }}>
-                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Overall monthly cap</div>
-                    <div style={{ fontSize: 16, fontWeight: 700 }}>
-                      {formatMoney(monthTotal)} <span style={{ color: T.sub, fontWeight: 600 }}>/</span> {formatMoney(monthlyBudgetTotal)}
-                    </div>
-                    <div style={{ fontSize: 12, color: monthTotal > monthlyBudgetTotal ? T.dng : T.sub, marginTop: 2 }}>
-                      {monthTotal > monthlyBudgetTotal
-                        ? `${formatMoney(monthTotal - monthlyBudgetTotal)} over`
-                        : `${formatMoney(Math.max(0, monthlyBudgetTotal - monthTotal))} remaining`}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBmCat(MONTH_TOTAL_BUDGET_KEY);
-                        setBmAmt(String(monthlyBudgetTotal));
-                        setShowBM(true);
-                      }}
-                      style={{
-                        background: T.card2,
-                        border: `1px solid ${T.bdr}`,
-                        color: T.txt,
-                        borderRadius: T.r,
-                        padding: "8px 12px",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void removeMonthlyBudgetTotal()}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: T.dng,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        padding: "8px 4px",
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBmCat(MONTH_TOTAL_BUDGET_KEY);
-                    setBmAmt("");
-                    setShowBM(true);
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "14px 16px",
-                    borderRadius: T.r,
-                    border: `1px dashed ${T.bdr}`,
-                    background: "rgba(255,255,255,0.03)",
-                    color: T.txt,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  + Overall monthly cap (optional — no category)
-                </button>
-              )}
-            </div>
-
+            {/* ─── Unified summary card ─── */}
             <div
               style={{
                 margin: `0 ${px}px 14px`,
@@ -4063,240 +3957,168 @@ export default function App({ onReady }) {
                 border: `1px solid ${T.bdr}`,
               }}
             >
-              <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>Total budgeted (this month)</div>
-              <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 12 }}>
-                {formatMoney(Object.values(budgets).reduce((s, v) => s + v, 0))}
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                <div>
-                  <div style={{ fontSize: 11, color: T.sub }}>Spent (budgeted cats)</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: T.dng }}>
-                    {formatMoney(Object.entries(budgets).reduce((s, [c]) => s + (catSpent[c] || 0), 0))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: T.sub }}>Remaining</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: T.acc }}>
-                    {formatMoney(Math.max(0, Object.entries(budgets).reduce((s, [c, l]) => s + (l - (catSpent[c] || 0)), 0)))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: T.sub }}>Over limit</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: T.warn }}>
-                    {Object.entries(budgets).filter(([c, l]) => (catSpent[c] || 0) > l).length}{" "}
-                    {Object.entries(budgets).filter(([c, l]) => (catSpent[c] || 0) > l).length === 1 ? "category" : "categories"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: `0 ${px}px` }}>
-              {budgetEntriesSorted.map(([cat, limit]) => (
-                <div key={cat} style={{ ...card, marginBottom: 10 }}>
-                  <BudgetBar cat={cat} limit={limit} spent={catSpent[cat] || 0} categories={categories} formatMoney={formatMoney} />
-                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginTop: 4 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBmCat(cat);
-                        setBmAmt(String(limit));
-                        setShowBM(true);
-                      }}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: T.sub,
-                        fontSize: 12,
-                        cursor: "pointer",
-                        padding: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <Pencil size={11} /> Edit limit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void removeBudgetCategory(cat)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: T.dng,
-                        fontSize: 12,
-                        cursor: "pointer",
-                        padding: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <Trash2 size={12} strokeWidth={2} /> Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {categories.filter((c) => !budgets[c.n]).length > 0 && (
+              {monthlyBudgetTotal != null && monthlyBudgetTotal > 0 ? (
                 <>
-                  <div style={{ marginTop: 16, marginBottom: 8, fontSize: 14, fontWeight: 600, color: T.sub }}>No budget set</div>
-                  {categories.filter((c) => !budgets[c.n]).map((c) => (
-                    <div
-                      key={c.n}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        setBmCat(c.n);
-                        setBmAmt("");
-                        setShowBM(true);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          setBmCat(c.n);
-                          setBmAmt("");
-                          setShowBM(true);
-                        }
-                      }}
-                      style={{ ...card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", opacity: 0.55 }}
-                    >
-                      <CategoryIcon name={c.n} size={20} color={c.c} />
-                      <span style={{ fontSize: 14, fontWeight: 600 }}>{c.n}</span>
-                      <div style={{ marginLeft: "auto", fontSize: 12, color: T.acc, border: `1px solid ${T.acc}`, borderRadius: 8, padding: "4px 10px" }}>+ Add</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Monthly cap</div>
+                      <div style={{ fontSize: 26, fontWeight: 800 }}>{formatMoney(monthlyBudgetTotal)}</div>
                     </div>
-                  ))}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" onClick={() => { setBmCat(MONTH_TOTAL_BUDGET_KEY); setBmAmt(String(monthlyBudgetTotal)); setShowBM(true); }} style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+                      <button type="button" onClick={() => void removeMonthlyBudgetTotal()} style={{ background: "none", border: "none", color: T.dng, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "6px 2px" }}>Remove</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 70 }}>
+                      <div style={{ fontSize: 11, color: T.sub }}>Spent</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: monthTotal > monthlyBudgetTotal ? T.dng : T.txt }}>{formatMoney(monthTotal)}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 70 }}>
+                      <div style={{ fontSize: 11, color: T.sub }}>Fixed</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: T.purp }}>{formatMoney(fixedTotal)}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 70 }}>
+                      <div style={{ fontSize: 11, color: T.sub }}>Flexible</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: monthlyBudgetTotal - fixedTotal > 0 ? T.acc : T.dng }}>{formatMoney(Math.max(0, monthlyBudgetTotal - fixedTotal))}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 70 }}>
+                      <div style={{ fontSize: 11, color: T.sub }}>Left</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: monthlyBudgetTotal - monthTotal > 0 ? T.acc : T.dng }}>{formatMoney(Math.max(0, monthlyBudgetTotal - monthTotal))}</div>
+                    </div>
+                  </div>
                 </>
-              )}
-            </div>
-
-            {/* ─── Fixed / Mandatory Expenses ─── */}
-            <div style={{ padding: `0 ${px}px`, marginTop: 22 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Lock size={16} color={T.purp} />
-                  <span style={{ fontSize: 16, fontWeight: 700 }}>Fixed Monthly Expenses</span>
-                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    setFixedDraft({ name: "", amount: "", category: categories[0]?.n || "Bills", dueDay: "1" });
-                    setShowFixedModal(true);
-                  }}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: 8,
-                    background: T.purp,
-                    border: "none",
-                    color: "#000",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
+                  onClick={() => { setBmCat(MONTH_TOTAL_BUDGET_KEY); setBmAmt(""); setShowBM(true); }}
+                  style={{ width: "100%", textAlign: "left", padding: 0, background: "none", border: "none", color: T.txt, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
                 >
-                  + Add
+                  <Target size={20} color={T.acc} />
+                  <span>+ Set overall monthly cap</span>
+                  <span style={{ fontSize: 12, color: T.sub, marginLeft: "auto" }}>Appears on Home</span>
                 </button>
-              </div>
-              <div style={{ fontSize: 12, color: T.sub, marginBottom: 12, lineHeight: 1.45 }}>
-                Bills you must pay every month — rent, utilities, EMIs, subscriptions. These help you know your committed spending before discretionary expenses.
-              </div>
-
-              {fixedExpenses.length > 0 && (
-                <div
-                  style={{
-                    background: "linear-gradient(135deg,#1C1C32 0%,#151530 100%)",
-                    borderRadius: T.rLg,
-                    padding: 18,
-                    border: `1px solid ${T.bdr}`,
-                    marginBottom: 14,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 12, color: T.sub, marginBottom: 2 }}>Total fixed / month</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: T.purp }}>{formatMoney(fixedTotal)}</div>
-                  </div>
-                  {monthlyBudgetTotal ? (
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 11, color: T.sub }}>Discretionary</div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: monthlyBudgetTotal - fixedTotal > 0 ? T.acc : T.dng }}>
-                        {formatMoney(Math.max(0, monthlyBudgetTotal - fixedTotal))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              {fixedExpenses.map((fe) => (
-                <div
-                  key={fe.name}
-                  style={{
-                    ...card,
-                    marginBottom: 8,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <CategoryIcon name={fe.category} size={20} color={T.purp} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fe.name}</div>
-                    <div style={{ fontSize: 11, color: T.sub }}>Due day {fe.dueDay || 1} · {fe.category}</div>
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 700, flexShrink: 0 }}>{formatMoney(fe.amount)}</div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFixedDraft({ name: fe.name, amount: String(fe.amount), category: fe.category, dueDay: String(fe.dueDay || 1) });
-                      setShowFixedModal(true);
-                    }}
-                    style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void removeFixedExpense(fe.name)}
-                    style={{ background: "none", border: "none", color: T.dng, cursor: "pointer", padding: 4, opacity: 0.7 }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-
-              {fixedExpenses.length === 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 10 }}>Quick-add common expenses:</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {FIXED_EXPENSE_TEMPLATES.slice(0, 8).map((t) => (
-                      <button
-                        key={t.name}
-                        type="button"
-                        onClick={() => {
-                          setFixedDraft({ name: t.name, amount: "", category: t.category, dueDay: "1" });
-                          setShowFixedModal(true);
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 8,
-                          border: `1px solid ${T.bdr}`,
-                          background: T.card2,
-                          color: T.txt,
-                          fontSize: 12,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 5,
-                        }}
-                      >
-                        <CategoryIcon name={t.category} size={12} color={T.purp} />
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
               )}
             </div>
+
+            {/* ─── BUDGETS sub-tab ─── */}
+            {budgetSubTab === "budgets" && (
+              <div style={{ padding: `0 ${px}px` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, color: T.sub }}>
+                    {Object.keys(budgets).length > 0 ? (
+                      <><strong style={{ color: T.txt }}>{Object.keys(budgets).length}</strong> category limits set</>
+                    ) : "No per-category limits yet"}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {Object.keys(budgets).length > 0 && (
+                      <button type="button" onClick={() => void clearAllBudgets()} disabled={fbStatus !== "ready"} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, border: `1px solid rgba(239,68,68,0.4)`, background: T.ddim, color: T.dng, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                        <Trash2 size={12} /> Clear
+                      </button>
+                    )}
+                    <button type="button" onClick={() => { setBmCat(""); setBmAmt(""); setShowBM(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.acc, border: "none", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                      + Add
+                    </button>
+                  </div>
+                </div>
+
+                {budgetEntriesSorted.map(([cat, limit]) => (
+                  <div key={cat} style={{ ...card, marginBottom: 10 }}>
+                    <BudgetBar cat={cat} limit={limit} spent={catSpent[cat] || 0} categories={categories} formatMoney={formatMoney} />
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginTop: 4 }}>
+                      <button type="button" onClick={() => { setBmCat(cat); setBmAmt(String(limit)); setShowBM(true); }} style={{ background: "none", border: "none", color: T.sub, fontSize: 12, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Pencil size={11} /> Edit
+                      </button>
+                      <button type="button" onClick={() => void removeBudgetCategory(cat)} style={{ background: "none", border: "none", color: T.dng, fontSize: 12, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Trash2 size={12} strokeWidth={2} /> Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {categories.filter((c) => !budgets[c.n]).length > 0 && (
+                  <>
+                    <div style={{ marginTop: 16, marginBottom: 8, fontSize: 14, fontWeight: 600, color: T.sub }}>No budget set</div>
+                    {categories.filter((c) => !budgets[c.n]).map((c) => (
+                      <div key={c.n} role="button" tabIndex={0} onClick={() => { setBmCat(c.n); setBmAmt(""); setShowBM(true); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { setBmCat(c.n); setBmAmt(""); setShowBM(true); } }} style={{ ...card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", opacity: 0.55 }}>
+                        <CategoryIcon name={c.n} size={20} color={c.c} />
+                        <span style={{ fontSize: 14, fontWeight: 600 }}>{c.n}</span>
+                        <div style={{ marginLeft: "auto", fontSize: 12, color: T.acc, border: `1px solid ${T.acc}`, borderRadius: 8, padding: "4px 10px" }}>+ Add</div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ─── FIXED EXPENSES sub-tab ─── */}
+            {budgetSubTab === "fixed" && (
+              <div style={{ padding: `0 ${px}px` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, color: T.sub }}>
+                    {fixedExpenses.length > 0 ? <><strong style={{ color: T.txt }}>{fixedExpenses.length}</strong> fixed expense{fixedExpenses.length !== 1 ? "s" : ""}</> : "No fixed expenses yet"}
+                  </div>
+                  <button type="button" onClick={() => { setFixedDraft({ name: "", amount: "", category: categories[0]?.n || "Bills", dueDay: "1" }); setShowFixedModal(true); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, background: T.purp, border: "none", color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    + Add
+                  </button>
+                </div>
+
+                {fixedExpenses.length > 0 && monthlyBudgetTotal > 0 && (
+                  <div style={{ ...card, marginBottom: 14, display: "flex", alignItems: "center", gap: 14 }}>
+                    <ResponsiveContainer width={100} height={100}>
+                      <PieChart>
+                        <Pie data={[{ name: "Fixed", value: fixedTotal }, { name: "Flexible", value: Math.max(0, monthlyBudgetTotal - fixedTotal) }]} cx="50%" cy="50%" innerRadius={28} outerRadius={44} paddingAngle={4} dataKey="value" stroke="none">
+                          <Cell fill={T.purp} />
+                          <Cell fill={T.acc} />
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: T.purp }} />
+                        <span style={{ fontSize: 13 }}>Fixed: <strong>{formatMoney(fixedTotal)}</strong></span>
+                        <span style={{ fontSize: 11, color: T.sub }}>{Math.round((fixedTotal / monthlyBudgetTotal) * 100)}%</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: T.acc }} />
+                        <span style={{ fontSize: 13 }}>Flexible: <strong>{formatMoney(Math.max(0, monthlyBudgetTotal - fixedTotal))}</strong></span>
+                        <span style={{ fontSize: 11, color: T.sub }}>{Math.round(((monthlyBudgetTotal - fixedTotal) / monthlyBudgetTotal) * 100)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {fixedExpenses.map((fe) => (
+                  <div key={fe.name} style={{ ...card, marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
+                    <CategoryIcon name={fe.category} size={20} color={T.purp} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fe.name}</div>
+                      <div style={{ fontSize: 11, color: T.sub }}>Due day {fe.dueDay || 1} · {fe.category}</div>
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, flexShrink: 0 }}>{formatMoney(fe.amount)}</div>
+                    <button type="button" onClick={() => { setFixedDraft({ name: fe.name, amount: String(fe.amount), category: fe.category, dueDay: String(fe.dueDay || 1) }); setShowFixedModal(true); }} style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}>
+                      <Pencil size={13} />
+                    </button>
+                    <button type="button" onClick={() => void removeFixedExpense(fe.name)} style={{ background: "none", border: "none", color: T.dng, cursor: "pointer", padding: 4, opacity: 0.7 }}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+
+                {fixedExpenses.length === 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, color: T.sub, marginBottom: 10 }}>Quick-add common expenses:</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {FIXED_EXPENSE_TEMPLATES.slice(0, 8).map((t) => (
+                        <button key={t.name} type="button" onClick={() => { setFixedDraft({ name: t.name, amount: "", category: t.category, dueDay: "1" }); setShowFixedModal(true); }} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${T.bdr}`, background: T.card2, color: T.txt, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                          <CategoryIcon name={t.category} size={12} color={T.purp} /> {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
           </div>
         )}

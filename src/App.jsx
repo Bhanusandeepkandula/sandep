@@ -648,6 +648,20 @@ export default function App() {
     setShowSplitScan(false);
   }
 
+  async function editTransaction(txId, updates) {
+    if (!txId || !updates || typeof updates !== "object") return;
+    setTxs((prev) => prev.map((t) => (t.id === txId ? { ...t, ...updates } : t)));
+    setSelectedTx((st) => (st && st.id === txId ? { ...st, ...updates } : st));
+    if (uidRef.current) {
+      try {
+        const ref = doc(db, "users", uidRef.current, "transactions", txId);
+        await setDoc(ref, sanitizeForFirestore(updates), { merge: true });
+      } catch (e) {
+        console.error("Failed to save edit:", e);
+      }
+    }
+  }
+
   async function updateTransactionSplit(txId, splitPayload) {
     const cleaned =
       splitPayload && splitPayload.people?.length
@@ -2358,7 +2372,7 @@ export default function App() {
                   See all
                 </button>
               </div>
-              {txs.slice(0, 10).map((tx) => (
+              {txs.slice(0, 100).map((tx) => (
                 <TxRow
                   key={tx.id}
                   tx={tx}
@@ -2749,14 +2763,7 @@ export default function App() {
                   boxSizing: "border-box",
                 }}
               >
-                <div style={{ fontSize: 13, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
-                  Upload a receipt photo, paste text, or use the mic. Images are read with Tesseract OCR (same engine family as{" "}
-                  <a href="https://github.com/tesseract-ocr/tesseract" target="_blank" rel="noopener noreferrer" style={{ color: T.blue }}>
-                    tesseract-ocr/tesseract
-                  </a>
-                  ), then OpenAI turns the text into CSV; if something is missing, we ask you to add it below and convert again.
-                </div>
-                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
                   <button
                     type="button"
                     disabled={ocrCsvTessBusy}
@@ -2764,90 +2771,38 @@ export default function App() {
                     style={{
                       ...inp,
                       flex: 1,
-                      minWidth: 140,
-                      minHeight: 48,
+                      minWidth: 120,
+                      minHeight: 44,
                       cursor: ocrCsvTessBusy ? "not-allowed" : "pointer",
                       fontWeight: 600,
+                      fontSize: 13,
                       background: T.card2,
                     }}
                   >
-                    {ocrCsvTessBusy ? "Extracting text…" : "Extract text from file"}
+                    {ocrCsvTessBusy ? "Extracting…" : "Upload image / file"}
                   </button>
+                  <OcrCsvVoiceControls
+                    active={step === "ocrCsv"}
+                    disabled={ocrCsvBusy || ocrCsvTessBusy}
+                    onAppend={appendOcrFromVoice}
+                  />
                 </div>
-                <OcrCsvVoiceControls
-                  active={step === "ocrCsv"}
-                  disabled={ocrCsvBusy || ocrCsvTessBusy}
-                  onAppend={appendOcrFromVoice}
-                />
-                <label style={lbl}>OCR / bill text</label>
                 <textarea
                   value={ocrCsvText}
                   onChange={(e) => setOcrCsvText(e.target.value)}
-                  placeholder="Paste receipt text here…"
-                  rows={8}
+                  placeholder="Paste receipt / bank text here, or use the buttons above…"
+                  rows={6}
                   style={{
                     ...inp,
                     width: "100%",
                     resize: "vertical",
-                    minHeight: 160,
+                    minHeight: 120,
                     fontFamily: "ui-monospace, monospace",
-                    fontSize: 13,
-                    lineHeight: 1.45,
+                    fontSize: 12,
+                    lineHeight: 1.4,
                     marginBottom: 12,
                   }}
                 />
-                <label style={lbl}>Date context (optional)</label>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 10,
-                    marginBottom: 10,
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Year for dates missing a year (defaults to current year)</div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={4}
-                      value={ocrDateYear}
-                      onChange={(e) => setOcrDateYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      placeholder={String(new Date().getFullYear())}
-                      style={{ ...inp, width: "100%", minHeight: 44 }}
-                    />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Month (optional, 01–12)</div>
-                    <select
-                      value={ocrDateMonth}
-                      onChange={(e) => setOcrDateMonth(e.target.value)}
-                      style={{ ...inp, width: "100%", minHeight: 44 }}
-                    >
-                      <option value="">— Not set —</option>
-                      {Array.from({ length: 12 }, (_, i) => {
-                        const mm = String(i + 1).padStart(2, "0");
-                        return (
-                          <option key={mm} value={mm}>
-                            {mm}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                </div>
-                {ocrTextLooksMissingFourDigitYear(ocrCsvText) ? (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: T.warn,
-                      marginBottom: 10,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    No 4-digit year found in the text above — we’ll assume the current year unless you change it.
-                  </div>
-                ) : null}
                 <button
                   type="button"
                   disabled={ocrCsvBusy || ocrCsvTessBusy}
@@ -2868,12 +2823,51 @@ export default function App() {
                 >
                   {ocrCsvBusy ? "Converting…" : "Convert to CSV"}
                 </button>
-                <ExternalLlmCsvPromptPanel
-                  prompt={externalLlmImagePrompt}
-                  onCopy={copyExternalLlmImagePrompt}
-                  disabled={ocrCsvBusy || ocrCsvTessBusy}
-                  blurb="Use this in ChatGPT, Claude, Gemini, Copilot, Grok, or any vision model: copy the prompt, paste it there, attach your receipt or bank screenshot, then copy the CSV from the reply into the text area above (or into a .csv file). Plain CSV is listed first; JSON is the fallback if the chat UI breaks line breaks."
-                />
+                <details style={{ ...card2, marginBottom: 14, fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, color: T.txt }}>Settings & tools</summary>
+                  <div style={{ marginTop: 12 }}>
+                    <label style={lbl}>Date context</label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Year (defaults to {new Date().getFullYear()})</div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          value={ocrDateYear}
+                          onChange={(e) => setOcrDateYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                          placeholder={String(new Date().getFullYear())}
+                          style={{ ...inp, width: "100%", minHeight: 40 }}
+                        />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Month (01–12)</div>
+                        <select
+                          value={ocrDateMonth}
+                          onChange={(e) => setOcrDateMonth(e.target.value)}
+                          style={{ ...inp, width: "100%", minHeight: 40 }}
+                        >
+                          <option value="">Auto</option>
+                          {Array.from({ length: 12 }, (_, i) => {
+                            const mm = String(i + 1).padStart(2, "0");
+                            return <option key={mm} value={mm}>{mm}</option>;
+                          })}
+                        </select>
+                      </div>
+                    </div>
+                    {ocrTextLooksMissingFourDigitYear(ocrCsvText) && (
+                      <div style={{ fontSize: 11, color: T.warn, marginBottom: 10 }}>
+                        No year found in text — current year will be used.
+                      </div>
+                    )}
+                    <ExternalLlmCsvPromptPanel
+                      prompt={externalLlmImagePrompt}
+                      onCopy={copyExternalLlmImagePrompt}
+                      disabled={ocrCsvBusy || ocrCsvTessBusy}
+                      blurb="Copy this prompt into ChatGPT, Claude, Gemini, or any vision model. Attach your screenshot, then paste the CSV result above."
+                    />
+                  </div>
+                </details>
                 {ocrCsvErr && (
                   <div
                     style={{
@@ -4055,44 +4049,6 @@ export default function App() {
             </div>
 
             <div style={{ padding: `0 ${px}px` }}>
-              {Object.keys(budgets).length === 0 ? (
-                <div
-                  style={{
-                    ...card,
-                    marginBottom: 14,
-                    textAlign: "center",
-                    padding: "28px 20px",
-                    borderStyle: "dashed",
-                  }}
-                >
-                  <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>No budgets yet</div>
-                  <div style={{ fontSize: 13, color: T.sub, lineHeight: 1.5, marginBottom: 16 }}>
-                    Set a monthly cap per category. We compare it to this month’s spending and warn you on Home when you’re close or over.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBmCat("");
-                      setBmAmt("");
-                      setShowBM(true);
-                    }}
-                    style={{
-                      padding: "12px 20px",
-                      borderRadius: T.r,
-                      background: T.acc,
-                      border: "none",
-                      color: "#000",
-                      fontWeight: 800,
-                      fontSize: 14,
-                      cursor: "pointer",
-                    }}
-                  >
-                    + Add your first budget
-                  </button>
-                </div>
-              ) : null}
-
               {budgetEntriesSorted.map(([cat, limit]) => (
                 <div key={cat} style={{ ...card, marginBottom: 10 }}>
                   <BudgetBar cat={cat} limit={limit} spent={catSpent[cat] || 0} categories={categories} formatMoney={formatMoney} />
@@ -4985,10 +4941,12 @@ export default function App() {
       <TxDetail
         tx={selectedTx}
         categories={categories}
+        payments={catalogRef.current.payments || []}
         formatMoney={formatMoney}
         dateLocale={dateLocale || locale}
         splitContacts={people}
         onSaveSplit={(txId, split) => void updateTransactionSplit(txId, split)}
+        onEdit={(txId, updates) => void editTransaction(txId, updates)}
         onClose={() => setSelectedTx(null)}
         onDelete={(id) => {
           delTx(id);

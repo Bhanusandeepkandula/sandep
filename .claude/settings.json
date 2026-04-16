@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npm run *)",
+      "Bash(git pull *)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/NanoNets/docstrange/main/package.json\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/NanoNets/docstrange/refs/heads/main/README.md\")",
+      "Bash(npm install *)"
+    ]
+  }
+}

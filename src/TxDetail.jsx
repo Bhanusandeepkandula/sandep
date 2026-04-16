@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Trash2, Users } from "lucide-react";
+import { X, Trash2, Users, Pencil } from "lucide-react";
 import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 import { normalizePerson, personStableKey } from "./splitContactShare.js";
@@ -11,16 +11,57 @@ import { normalizePerson, personStableKey } from "./splitContactShare.js";
 export function TxDetail({
   tx,
   categories,
+  payments = [],
   formatMoney,
   dateLocale,
   onClose,
   onDelete,
+  onEdit,
   splitContacts = [],
   onSaveSplit,
 }) {
   const [splitOn, setSplitOn] = useState(false);
   const [splitType, setSplitType] = useState("equal");
   const [splitPpl, setSplitPpl] = useState([]);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(null);
+
+  useEffect(() => {
+    setEditing(false);
+    setEditDraft(null);
+  }, [tx?.id]);
+
+  function startEdit() {
+    setEditDraft({
+      amount: tx.amount != null ? String(tx.amount) : "",
+      date: tx.date || "",
+      category: tx.category || "",
+      payment: tx.payment || "",
+      notes: tx.notes || "",
+    });
+    setEditing(true);
+  }
+
+  function saveEdit() {
+    if (!editDraft || !onEdit) return;
+    const amt = parseFloat(editDraft.amount);
+    if (!Number.isFinite(amt) || amt <= 0) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editDraft.date)) return;
+    onEdit(tx.id, {
+      amount: amt,
+      date: editDraft.date,
+      category: editDraft.category,
+      payment: editDraft.payment,
+      notes: editDraft.notes,
+    });
+    setEditing(false);
+    setEditDraft(null);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditDraft(null);
+  }
 
   useEffect(() => {
     if (!tx) return;
@@ -156,10 +197,35 @@ export function TxDetail({
             padding: "8px 16px 12px",
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 700, color: T.txt }}>Transaction Details</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.txt }}>
+              {editing ? "Edit Transaction" : "Transaction Details"}
+            </div>
+            {!editing && onEdit && (
+              <button
+                type="button"
+                onClick={startEdit}
+                style={{
+                  background: T.card2 || "rgba(255,255,255,0.06)",
+                  border: `1px solid ${T.bdr}`,
+                  color: T.blue,
+                  cursor: "pointer",
+                  padding: "4px 10px",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                <Pencil size={12} /> Edit
+              </button>
+            )}
+          </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={editing ? cancelEdit : onClose}
             style={{
               background: "none",
               border: "none",
@@ -191,6 +257,100 @@ export function TxDetail({
           </div>
         )}
 
+        {editing && editDraft ? (
+          <div style={{ padding: "0 16px 16px" }}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: T.sub, display: "block", marginBottom: 4 }}>Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={editDraft.amount}
+                onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))}
+                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 15 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: T.sub, display: "block", marginBottom: 4 }}>Date</label>
+              <input
+                type="date"
+                value={editDraft.date}
+                onChange={(e) => setEditDraft((d) => ({ ...d, date: e.target.value }))}
+                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: T.sub, display: "block", marginBottom: 4 }}>Category</label>
+              <select
+                value={editDraft.category}
+                onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value }))}
+                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+              >
+                <option value="">—</option>
+                {(categories || []).map((c) => (
+                  <option key={c.n} value={c.n}>{c.e} {c.n}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: T.sub, display: "block", marginBottom: 4 }}>Payment</label>
+              <select
+                value={editDraft.payment}
+                onChange={(e) => setEditDraft((d) => ({ ...d, payment: e.target.value }))}
+                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+              >
+                {(payments || []).map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: T.sub, display: "block", marginBottom: 4 }}>Notes</label>
+              <input
+                type="text"
+                value={editDraft.notes}
+                onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
+                placeholder="Merchant or description"
+                style={{ ...inp, width: "100%", padding: "10px 12px", fontSize: 14 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={saveEdit}
+                style={{
+                  flex: 1,
+                  padding: "14px",
+                  borderRadius: 14,
+                  border: "none",
+                  background: T.acc,
+                  color: "#000",
+                  fontSize: 15,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                style={{
+                  padding: "14px 20px",
+                  borderRadius: 14,
+                  border: `1px solid ${T.bdr}`,
+                  background: "transparent",
+                  color: T.sub,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
         <div style={{ padding: "0 16px 16px", textAlign: "center" }}>
           <div
             style={{
@@ -499,6 +659,8 @@ export function TxDetail({
               </div>
             ))}
           </div>
+        )}
+          </>
         )}
 
         <div style={{ padding: "20px 16px 36px" }}>

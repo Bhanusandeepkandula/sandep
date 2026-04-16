@@ -1,39 +1,37 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Mic, MicOff } from "lucide-react";
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { T, inp } from "./config.js";
 
+const SpeechRecognitionAPI =
+  typeof window !== "undefined"
+    ? window.SpeechRecognition || window.webkitSpeechRecognition
+    : null;
+
 /**
- * Dictation for OCR → CSV: uses the browser Web Speech API (best in Chrome / Edge).
- * @param {{ onAppend: (text: string) => void; disabled?: boolean; active?: boolean }} props
+ * Dictation for OCR → CSV: uses the browser Web Speech API directly.
+ * Works in Chrome, Edge, and Safari 14.1+.
  */
 export function OcrCsvVoiceControls({ onAppend, disabled = false, active = true }) {
-  const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
-  const prevListening = useRef(false);
+  const [listening, setListening] = useState(false);
+  const recogRef = useRef(null);
+  const resultRef = useRef("");
+
+  const stop = useCallback(() => {
+    try { recogRef.current?.stop(); } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
-    if (!active && listening) {
-      try {
-        SpeechRecognition.stopListening();
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [active, listening]);
+    if (!active && listening) stop();
+  }, [active, listening, stop]);
 
   useEffect(() => {
-    if (prevListening.current && !listening && active) {
-      const t = transcript.trim();
-      if (t) onAppend(t);
-      resetTranscript();
-    }
-    prevListening.current = listening;
-  }, [listening, transcript, onAppend, resetTranscript, active]);
+    return () => stop();
+  }, [stop]);
 
-  if (!browserSupportsSpeechRecognition) {
+  if (!SpeechRecognitionAPI) {
     return (
       <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.4, marginBottom: 8 }}>
-        Voice typing needs a browser with the Web Speech API (Chrome or Edge on desktop; limited on Safari).
+        Voice typing needs a browser with Speech Recognition (Chrome, Edge, or Safari 14.1+).
       </div>
     );
   }
@@ -41,13 +39,41 @@ export function OcrCsvVoiceControls({ onAppend, disabled = false, active = true 
   function toggle() {
     if (disabled) return;
     if (listening) {
-      SpeechRecognition.stopListening();
-    } else {
-      resetTranscript();
-      SpeechRecognition.startListening({
-        continuous: true,
-        language: typeof navigator !== "undefined" && navigator.language ? navigator.language : "en-US",
-      });
+      stop();
+      return;
+    }
+    resultRef.current = "";
+    const recog = new SpeechRecognitionAPI();
+    recog.continuous = true;
+    recog.interimResults = false;
+    recog.lang = navigator.language || "en-US";
+
+    recog.onresult = (e) => {
+      let text = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) text += e.results[i][0].transcript;
+      }
+      if (text.trim()) resultRef.current += (resultRef.current ? " " : "") + text.trim();
+    };
+    recog.onend = () => {
+      setListening(false);
+      const t = resultRef.current.trim();
+      if (t) onAppend(t);
+      resultRef.current = "";
+      recogRef.current = null;
+    };
+    recog.onerror = (e) => {
+      console.warn("Speech recognition error:", e.error);
+      setListening(false);
+      recogRef.current = null;
+    };
+
+    recogRef.current = recog;
+    try {
+      recog.start();
+      setListening(true);
+    } catch (err) {
+      console.warn("Could not start speech recognition:", err);
     }
   }
 
@@ -56,7 +82,7 @@ export function OcrCsvVoiceControls({ onAppend, disabled = false, active = true 
       <button
         type="button"
         disabled={disabled}
-        onClick={() => toggle()}
+        onClick={toggle}
         aria-pressed={listening}
         aria-label={listening ? "Stop voice input" : "Start voice input"}
         style={{
@@ -65,22 +91,23 @@ export function OcrCsvVoiceControls({ onAppend, disabled = false, active = true 
           alignItems: "center",
           justifyContent: "center",
           gap: 8,
-          minHeight: 48,
+          minHeight: 44,
           cursor: disabled ? "not-allowed" : "pointer",
-          fontWeight: 700,
+          fontWeight: 600,
+          fontSize: 13,
           background: listening ? "rgba(239,68,68,0.15)" : T.card2,
           borderColor: listening ? "rgba(239,68,68,0.45)" : T.bdr,
           color: listening ? T.dng : T.txt,
         }}
       >
-        {listening ? <MicOff size={18} /> : <Mic size={18} />}
-        {listening ? "Stop & add to text" : "Speak bill / amounts (mic)"}
+        {listening ? <MicOff size={16} /> : <Mic size={16} />}
+        {listening ? "Stop & add to text" : "Voice input"}
       </button>
-      {listening ? (
-        <div style={{ fontSize: 12, color: T.acc, marginTop: 8, lineHeight: 1.45 }}>
-          Listening… speak clearly. Tap again when done — text will be added to the box above.
+      {listening && (
+        <div style={{ fontSize: 12, color: T.acc, marginTop: 6, lineHeight: 1.4 }}>
+          Listening… speak clearly. Tap again when done.
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

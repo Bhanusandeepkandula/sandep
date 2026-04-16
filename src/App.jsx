@@ -102,6 +102,50 @@ import {
 /** UI + modal value for overall monthly cap (stored as `monthlyBudgetTotal` on settings/app, not under `budgets`). */
 const MONTH_TOTAL_BUDGET_KEY = "__month_total__";
 
+const CURRENCIES = [
+  { code: "INR", locale: "en-IN", symbol: "₹", name: "Indian Rupee", flag: "🇮🇳" },
+  { code: "USD", locale: "en-US", symbol: "$", name: "US Dollar", flag: "🇺🇸" },
+  { code: "EUR", locale: "de-DE", symbol: "€", name: "Euro", flag: "🇪🇺" },
+  { code: "GBP", locale: "en-GB", symbol: "£", name: "British Pound", flag: "🇬🇧" },
+  { code: "JPY", locale: "ja-JP", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵" },
+  { code: "CNY", locale: "zh-CN", symbol: "¥", name: "Chinese Yuan", flag: "🇨🇳" },
+  { code: "AUD", locale: "en-AU", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺" },
+  { code: "CAD", locale: "en-CA", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦" },
+  { code: "CHF", locale: "de-CH", symbol: "CHF", name: "Swiss Franc", flag: "🇨🇭" },
+  { code: "SGD", locale: "en-SG", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬" },
+  { code: "HKD", locale: "zh-HK", symbol: "HK$", name: "Hong Kong Dollar", flag: "🇭🇰" },
+  { code: "KRW", locale: "ko-KR", symbol: "₩", name: "South Korean Won", flag: "🇰🇷" },
+  { code: "MXN", locale: "es-MX", symbol: "MX$", name: "Mexican Peso", flag: "🇲🇽" },
+  { code: "BRL", locale: "pt-BR", symbol: "R$", name: "Brazilian Real", flag: "🇧🇷" },
+  { code: "ZAR", locale: "en-ZA", symbol: "R", name: "South African Rand", flag: "🇿🇦" },
+  { code: "AED", locale: "ar-AE", symbol: "د.إ", name: "UAE Dirham", flag: "🇦🇪" },
+  { code: "SAR", locale: "ar-SA", symbol: "﷼", name: "Saudi Riyal", flag: "🇸🇦" },
+  { code: "THB", locale: "th-TH", symbol: "฿", name: "Thai Baht", flag: "🇹🇭" },
+  { code: "IDR", locale: "id-ID", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩" },
+  { code: "MYR", locale: "ms-MY", symbol: "RM", name: "Malaysian Ringgit", flag: "🇲🇾" },
+  { code: "PHP", locale: "en-PH", symbol: "₱", name: "Philippine Peso", flag: "🇵🇭" },
+  { code: "VND", locale: "vi-VN", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳" },
+  { code: "TWD", locale: "zh-TW", symbol: "NT$", name: "New Taiwan Dollar", flag: "🇹🇼" },
+  { code: "TRY", locale: "tr-TR", symbol: "₺", name: "Turkish Lira", flag: "🇹🇷" },
+  { code: "RUB", locale: "ru-RU", symbol: "₽", name: "Russian Ruble", flag: "🇷🇺" },
+  { code: "PLN", locale: "pl-PL", symbol: "zł", name: "Polish Zloty", flag: "🇵🇱" },
+  { code: "SEK", locale: "sv-SE", symbol: "kr", name: "Swedish Krona", flag: "🇸🇪" },
+  { code: "NOK", locale: "nb-NO", symbol: "kr", name: "Norwegian Krone", flag: "🇳🇴" },
+  { code: "DKK", locale: "da-DK", symbol: "kr", name: "Danish Krone", flag: "🇩🇰" },
+  { code: "NZD", locale: "en-NZ", symbol: "NZ$", name: "New Zealand Dollar", flag: "🇳🇿" },
+  { code: "EGP", locale: "ar-EG", symbol: "E£", name: "Egyptian Pound", flag: "🇪🇬" },
+  { code: "NGN", locale: "en-NG", symbol: "₦", name: "Nigerian Naira", flag: "🇳🇬" },
+  { code: "KES", locale: "en-KE", symbol: "KSh", name: "Kenyan Shilling", flag: "🇰🇪" },
+  { code: "PKR", locale: "ur-PK", symbol: "₨", name: "Pakistani Rupee", flag: "🇵🇰" },
+  { code: "BDT", locale: "bn-BD", symbol: "৳", name: "Bangladeshi Taka", flag: "🇧🇩" },
+  { code: "LKR", locale: "si-LK", symbol: "Rs", name: "Sri Lankan Rupee", flag: "🇱🇰" },
+  { code: "NPR", locale: "ne-NP", symbol: "Rs", name: "Nepalese Rupee", flag: "🇳🇵" },
+  { code: "CLP", locale: "es-CL", symbol: "CL$", name: "Chilean Peso", flag: "🇨🇱" },
+  { code: "COP", locale: "es-CO", symbol: "COL$", name: "Colombian Peso", flag: "🇨🇴" },
+  { code: "ARS", locale: "es-AR", symbol: "AR$", name: "Argentine Peso", flag: "🇦🇷" },
+  { code: "PEN", locale: "es-PE", symbol: "S/", name: "Peruvian Sol", flag: "🇵🇪" },
+];
+
 /**
  * Collapsible copy-paste prompt for vision LLMs (ChatGPT, Claude, Gemini, etc.) → expense CSV.
  * @param {{ prompt: string; onCopy: () => void | Promise<void>; disabled?: boolean; blurb: string }} p
@@ -262,6 +306,8 @@ export default function App({ onReady }) {
   /** When set, overrides global `config/app` for this user only (stored in settings/app). */
   const [userCategories, setUserCategories] = useState(null);
   const [userPayments, setUserPayments] = useState(null);
+  const [userCurrency, setUserCurrency] = useState(null);
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
 
   const [fbStatus, setFbStatus] = useState("loading");
   const [fbErrorDetail, setFbErrorDetail] = useState("");
@@ -309,12 +355,17 @@ export default function App({ onReady }) {
         footerLine2: catalog.footerLine2 || F.footerLine2,
       };
     }
-    return {
+    const merged = {
       ...base,
       categories: userCategories && userCategories.length > 0 ? userCategories : base.categories,
       payments: userPayments && userPayments.length > 0 ? userPayments : base.payments,
     };
-  }, [catalog, fbStatus, userCategories, userPayments]);
+    if (userCurrency && userCurrency.code) {
+      merged.currencyCode = userCurrency.code;
+      merged.locale = userCurrency.locale || merged.locale;
+    }
+    return merged;
+  }, [catalog, fbStatus, userCategories, userPayments, userCurrency]);
 
   useEffect(() => {
     catalogRef.current = effectiveCatalog;
@@ -517,6 +568,8 @@ export default function App({ onReady }) {
           else setUserCategories(null);
           if (Array.isArray(d.userPayments) && d.userPayments.length > 0) setUserPayments(d.userPayments);
           else setUserPayments(null);
+          if (d.userCurrency && typeof d.userCurrency === "object" && d.userCurrency.code) setUserCurrency(d.userCurrency);
+          else setUserCurrency(null);
           if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
             setTips(d.aiInsights.items);
             setAiInsightsUpdatedAt(
@@ -555,6 +608,7 @@ export default function App({ onReady }) {
               }
               if (Array.isArray(o.userCategories) && o.userCategories.length > 0) setUserCategories(o.userCategories);
               if (Array.isArray(o.userPayments) && o.userPayments.length > 0) setUserPayments(o.userPayments);
+              if (o.userCurrency && typeof o.userCurrency === "object" && o.userCurrency.code) setUserCurrency(o.userCurrency);
             } else {
               setTxs([]);
               setBudgets({});
@@ -1911,6 +1965,18 @@ export default function App({ onReady }) {
   }
 
   const fixedTotal = fixedExpenses.reduce((s, f) => s + (f.amount || 0), 0);
+
+  async function saveUserCurrency(cur) {
+    setUserCurrency(cur);
+    setShowCurrencyPicker(false);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { userCurrency: cur }, { merge: true });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
 
   function toggleSplitPerson(name) {
     setSplitPpl((prev) => {
@@ -3378,7 +3444,7 @@ export default function App({ onReady }) {
                           minHeight: 40,
                         }}
                       >
-                        <CategoryIcon name={c.n} size={14} color={form.category === c.n ? "#000" : c.c} /> {c.n}
+                        <CategoryIcon name={c.n} size={14} color={c.c} /> {c.n}
                       </button>
                     ))}
                   </div>
@@ -4362,23 +4428,27 @@ export default function App({ onReady }) {
                   <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Return to PIN screen</div>
                 </div>
               </button>
-              {[
-                { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn },
-                { Icon: RefreshCw, label: "Currency", sub: "INR ₹", color: T.acc },
-                { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue },
-                { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp },
-              ].map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 3 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${item.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <item.Icon size={18} color={item.color} strokeWidth={1.8} />
+              {(() => {
+                const activeCur = CURRENCIES.find((c) => c.code === currencyCode) || CURRENCIES[0];
+                const settingsRows = [
+                  { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null },
+                  { Icon: RefreshCw, label: "Currency", sub: `${activeCur.flag} ${activeCur.code} ${activeCur.symbol}`, color: T.acc, onClick: () => setShowCurrencyPicker(true) },
+                  { Icon: Copy, label: "Export Data", sub: "Download CSV or PDF", color: T.blue, onClick: null },
+                  { Icon: Lock, label: "Privacy & Security", sub: "Data & permissions", color: T.purp, onClick: null },
+                ];
+                return settingsRows.map((item, i) => (
+                  <div key={i} role={item.onClick ? "button" : undefined} tabIndex={item.onClick ? 0 : undefined} onClick={item.onClick || undefined} onKeyDown={item.onClick ? (e) => { if (e.key === "Enter" || e.key === " ") item.onClick(); } : undefined} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < settingsRows.length - 1 ? `1px solid ${T.bdr}` : "none", cursor: "pointer" }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: `${item.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <item.Icon size={18} color={item.color} strokeWidth={1.8} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
+                      <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
+                    </div>
+                    <ChevronRight size={16} color={T.mut} />
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</div>
-                    <div style={{ fontSize: 12, color: T.sub }}>{item.sub}</div>
-                  </div>
-                  <ChevronRight size={16} color={T.mut} />
-                </div>
-              ))}
+                ));
+              })()}
             </div>
 
             <div style={{ ...card, marginBottom: 14 }}>
@@ -4728,6 +4798,71 @@ export default function App({ onReady }) {
           </div>
         </div>
       ) : null}
+
+      {showCurrencyPicker && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 500, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCurrencyPicker(false); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: maxShell,
+              maxHeight: "80dvh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              background: T.card,
+              borderRadius: "20px 20px 0 0",
+              padding: "20px 0 0",
+              paddingBottom: "max(20px, calc(12px + env(safe-area-inset-bottom, 0px)))",
+              boxSizing: "border-box",
+            }}
+          >
+            <div style={{ padding: "0 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 17, fontWeight: 800 }}>Select Currency</div>
+              <button type="button" onClick={() => setShowCurrencyPicker(false)} style={{ background: "none", border: "none", color: T.sub, cursor: "pointer", padding: 4 }}>
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: "0 8px" }}>
+              {CURRENCIES.map((cur) => {
+                const active = cur.code === currencyCode;
+                return (
+                  <button
+                    key={cur.code}
+                    type="button"
+                    onClick={() => void saveUserCurrency({ code: cur.code, locale: cur.locale })}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: active ? T.adim : "transparent",
+                      color: T.txt,
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span style={{ fontSize: 24, lineHeight: 1 }}>{cur.flag}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: active ? 700 : 500 }}>{cur.name}</div>
+                      <div style={{ fontSize: 12, color: T.sub }}>{cur.code}</div>
+                    </div>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: active ? T.acc : T.sub, minWidth: 40, textAlign: "right" }}>{cur.symbol}</span>
+                    {active && <div style={{ width: 8, height: 8, borderRadius: 4, background: T.acc, flexShrink: 0 }} />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <SplitQrScanModal open={showSplitScan} onClose={() => setShowSplitScan(false)} onDecoded={(t) => void handleSplitContactDecoded(t)} />
 

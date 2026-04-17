@@ -3356,132 +3356,130 @@ export default function App({ onReady }) {
               </button>
             </div>
 
-            <div
-              className="g hero-card"
-              style={{
-                margin: `0 ${px}px 14px`,
-                borderRadius: T.rLg,
-                padding: 22,
-                position: "relative",
-                overflow: "hidden",
-              }}
-            >
-              {/* Decorative colour orbs inside card */}
-              <div
-                style={{
-                  position: "absolute",
-                  right: -24,
-                  top: -24,
-                  width: 140,
-                  height: 140,
-                  borderRadius: "50%",
-                  background: T.adim,
-                  pointerEvents: "none",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  right: 16,
-                  bottom: -36,
-                  width: 100,
-                  height: 100,
-                  borderRadius: "50%",
-                  background: T.bdim,
-                  pointerEvents: "none",
-                }}
-              />
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: 14,
-                  marginBottom: 14,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 4, letterSpacing: "-0.1px" }}>This Month</div>
-                  <div className="stat-display" style={{ fontSize: 42, lineHeight: 1.0, marginBottom: 2 }}>{formatMoney(monthTotal)}</div>
-                  <div style={{ fontSize: 11, color: T.mut, marginTop: 4, lineHeight: 1.35 }}>
-                    Only spending dated in {calendarMonthLabel}. Imports keep the date from the bank or receipt.
-                  </div>
-                </div>
-                {monthBudgetRing ? (
-                  <button
-                    type="button"
-                    onClick={() => setTab("budgets")}
-                    title="Monthly spending cap — tap to edit in Budgets"
-                    aria-label="Monthly budget progress, open Budgets"
-                    style={{
-                      flexShrink: 0,
-                      position: "relative",
-                      width: 92,
-                      height: 92,
-                      padding: 0,
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <svg width={92} height={92} viewBox="0 0 100 100" style={{ transform: "rotate(-90deg)", display: "block" }} aria-hidden>
-                      <circle cx="50" cy="50" r="38" fill="none" stroke={T.id === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"} strokeWidth="6" />
-                      <circle
-                        cx="50"
-                        cy="50"
-                        r="38"
-                        fill="none"
-                        stroke={monthBudgetRing.over ? T.dng : monthBudgetRing.remainingFrac <= 0.2 ? T.warn : T.acc}
-                        strokeWidth="6"
-                        strokeLinecap="round"
-                        strokeDasharray={`${monthBudgetRing.remainingFrac * (2 * Math.PI * 38)} ${2 * Math.PI * 38}`}
-                        style={{ transition: "stroke-dasharray 0.45s ease, stroke 0.25s ease" }}
-                      />
-                    </svg>
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      {monthBudgetRing.over ? (
-                        <div style={{ fontSize: 14, fontWeight: 800, color: T.dng }}>Over</div>
-                      ) : (
-                        <>
-                          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.5px" }}>{Math.round(monthBudgetRing.remainingFrac * 100)}%</div>
-                          <div style={{ fontSize: 9, color: T.sub, marginTop: 1 }}>left</div>
-                        </>
+            {(() => {
+              const barColor = monthBudgetRing?.over
+                ? T.dng
+                : monthBudgetRing && monthBudgetRing.remainingFrac <= 0.2
+                ? T.warn
+                : T.acc;
+              const spentFrac = monthBudgetRing
+                ? Math.max(0, Math.min(1, 1 - monthBudgetRing.remainingFrac))
+                : 0;
+              return (
+                <div
+                  style={{
+                    margin: `0 ${px}px 14px`,
+                    background: T.card,
+                    border: `1px solid ${T.bdr}`,
+                    borderRadius: T.rLg,
+                    padding: 20,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 14 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: T.sub, marginBottom: 4, fontWeight: 600, letterSpacing: 0.2, textTransform: "uppercase" }}>This Month</div>
+                      <div className="stat-display" style={{ fontSize: 40, lineHeight: 1.0, color: T.txt }}>{formatMoney(monthTotal)}</div>
+                      {monthBudgetRing && (
+                        <div style={{ fontSize: 12, color: T.sub, marginTop: 8 }}>
+                          of <span style={{ color: T.txt, fontWeight: 700 }}>{formatMoney(monthBudgetRing.cap)}</span> budget
+                        </div>
                       )}
                     </div>
-                  </button>
-                ) : null}
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                {[
-                  { label: "Today", val: todayTotal },
-                  { label: "This Week", val: weekTotal },
-                ].map((s) => (
-                  <div key={s.label} style={{
-                    flex: 1,
-                    background: T.id === "light" || T.id === "lightblue" ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.06)",
-                    borderRadius: 14,
-                    padding: "10px 14px",
-                    border: "1px solid rgba(255,255,255,0.06)",
-                  }}>
-                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 3, letterSpacing: "-0.1px" }}>{s.label}</div>
-                    <div className="stat-display" style={{ fontSize: 18 }}>{formatMoney(s.val)}</div>
+                    {monthBudgetRing ? (
+                      <button
+                        type="button"
+                        onClick={() => setTab("budgets")}
+                        title="Monthly spending cap — tap to edit in Budgets"
+                        aria-label="Monthly budget status, open Budgets"
+                        style={{
+                          flexShrink: 0,
+                          minWidth: 68,
+                          padding: "8px 12px",
+                          borderRadius: 12,
+                          border: `1px solid ${barColor}44`,
+                          background: monthBudgetRing.over ? T.ddim : monthBudgetRing.remainingFrac <= 0.2 ? T.wdim : T.adim,
+                          color: barColor,
+                          cursor: "pointer",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 2,
+                        }}
+                      >
+                        {monthBudgetRing.over ? (
+                          <>
+                            <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1 }}>Over</div>
+                            <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>budget</div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.4px" }}>
+                              {Math.round(monthBudgetRing.remainingFrac * 100)}%
+                            </div>
+                            <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>left</div>
+                          </>
+                        )}
+                      </button>
+                    ) : null}
                   </div>
-                ))}
-              </div>
-            </div>
+
+                  {monthBudgetRing && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div
+                        style={{
+                          height: 6,
+                          borderRadius: 999,
+                          background: T.card2,
+                          overflow: "hidden",
+                          position: "relative",
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: `${Math.min(100, spentFrac * 100)}%`,
+                            background: barColor,
+                            borderRadius: 999,
+                            transition: "width 0.45s ease, background 0.25s ease",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {[
+                      { label: "Today", val: todayTotal },
+                      { label: "This Week", val: weekTotal },
+                    ].map((s) => (
+                      <div
+                        key={s.label}
+                        style={{
+                          flex: 1,
+                          background: T.card2,
+                          border: `1px solid ${T.bdr}`,
+                          borderRadius: T.r,
+                          padding: "10px 14px",
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: T.sub, marginBottom: 3, letterSpacing: "-0.1px" }}>{s.label}</div>
+                        <div className="stat-display" style={{ fontSize: 18, color: T.txt }}>{formatMoney(s.val)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!monthBudgetRing && (
+                    <div style={{ fontSize: 11, color: T.mut, marginTop: 10, lineHeight: 1.4 }}>
+                      Only spending dated in {calendarMonthLabel}. Set a monthly cap in Budgets to track % used.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {expenseCountOutsideThisCalendarMonth > 0 && monthTotal === 0 && txs.length > 0 ? (
               <div

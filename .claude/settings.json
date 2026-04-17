@@ -11,7 +11,8 @@
       "Bash(npm install *)",
       "Bash(firebase deploy *)",
       "Bash(npx firebase-tools *)",
-      "Bash(npx firebase-tools@latest login --no-localhost)"
+      "Bash(npx firebase-tools@latest login --no-localhost)",
+      "Bash(npm list *)"
     ]
   }
 }

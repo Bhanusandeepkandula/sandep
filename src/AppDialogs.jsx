@@ -97,6 +97,7 @@ function ToastStack({ toasts, onDismiss }) {
         return (
           <div
             key={t.id}
+            className="g-toast"
             onClick={clickable ? () => { try { t.onClick(); } finally { onDismiss && onDismiss(t.id); } } : undefined}
             role={clickable ? "button" : undefined}
             tabIndex={clickable ? 0 : undefined}
@@ -106,14 +107,11 @@ function ToastStack({ toasts, onDismiss }) {
               maxWidth: 400,
               marginBottom: 8,
               padding: "12px 14px",
-              borderRadius: 14,
-              background: T.card,
-              border: `1px solid ${color}44`,
-              boxShadow: `0 8px 32px rgba(0,0,0,0.35)`,
+              borderRadius: 18,
               display: "flex",
               alignItems: "center",
               gap: 10,
-              animation: t.leaving ? "toast-out .3s ease-in forwards" : "toast-in .3s ease-out",
+              animation: t.leaving ? "toast-out .3s ease-in forwards" : "ios-notify-drop .35s cubic-bezier(0.34,1.56,0.64,1)",
               cursor: clickable ? "pointer" : "default",
             }}
           >
@@ -167,18 +165,16 @@ function ConfirmOverlay({ title, msg, type, confirmLabel, cancelLabel, danger, o
       }}
     >
       <div
+        className="g-dialog"
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxWidth: 360,
-          background: T.card,
-          borderRadius: 20,
+          borderRadius: 22,
           padding: 24,
-          border: `1px solid ${T.bdr}`,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
           transform: show ? "scale(1) translateY(0)" : "scale(0.92) translateY(12px)",
           opacity: show ? 1 : 0,
-          transition: "transform .25s cubic-bezier(.34,1.56,.64,1), opacity .2s ease",
+          transition: "transform .3s cubic-bezier(.34,1.56,.64,1), opacity .22s ease",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>

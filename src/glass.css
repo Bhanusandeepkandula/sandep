@@ -1,0 +1,551 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   iOS 26 Liquid Glass Design System — Track App
+   References: Apple WWDC25, iOS 26 HIG, visionOS materials
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Google Font: Inter (closest open-source SF Pro substitute) ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Inter+Display:wght@700;800;900&display=swap');
+
+/* ── Design tokens ── */
+:root {
+  --glass-dark:     rgba(18, 18, 36, 0.72);
+  --glass-light:    rgba(255, 255, 255, 0.72);
+  --glass-edge-d:   rgba(255, 255, 255, 0.10);
+  --glass-edge-l:   rgba(0,   0,   0,  0.08);
+  --glass-blur:     blur(48px) saturate(200%);
+  --glass-blur-sm:  blur(28px) saturate(180%);
+  --glass-hi:       inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --glass-shadow-d: 0 8px 40px rgba(0, 0, 0, 0.50);
+  --glass-shadow-l: 0 4px 24px rgba(0, 0, 0, 0.12);
+
+  /* Active surface (depends on theme, defaulting to dark) */
+  --gs: var(--glass-dark);
+  --ge: var(--glass-edge-d);
+  --gsh: var(--glass-shadow-d);
+
+  /* iOS 26 system colours (dark) */
+  --ios-blue:   #0A84FF;
+  --ios-green:  #30D158;
+  --ios-orange: #FF9F0A;
+  --ios-red:    #FF453A;
+  --ios-purple: #BF5AF2;
+  --ios-teal:   #40CBE0;
+  --ios-yellow: #FFD60A;
+  --ios-pink:   #FF375F;
+
+  /* Motion */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease:   cubic-bezier(0.22, 1.00, 0.36, 1);
+  --snap:   cubic-bezier(0.16, 1.00, 0.30, 1);
+}
+
+/* ── Light-theme overrides ── */
+[data-theme="light"], [data-theme="lightblue"] {
+  --gs:  var(--glass-light);
+  --ge:  var(--glass-edge-l);
+  --gsh: var(--glass-shadow-l);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANIMATED BACKGROUND MESH  (iOS 26 dynamic colour pools)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.glass-bg {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The mesh orbs live in a pseudo-element so they never interfere with hit-testing */
+.glass-bg::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 55% at  8% 12%, rgba( 96,165,250, 0.11) 0%, transparent 60%),
+    radial-gradient(ellipse 65% 50% at 90% 72%, rgba(167,139,250, 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 45% at 52% 97%, rgba( 34,197, 94, 0.08) 0%, transparent 55%);
+  animation: mesh-drift 28s ease-in-out infinite alternate;
+  will-change: background;
+}
+
+[data-theme="light"] .glass-bg::after,
+[data-theme="lightblue"] .glass-bg::after {
+  background:
+    radial-gradient(ellipse 70% 55% at  8% 12%, rgba(37, 99,235, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 65% 50% at 90% 72%, rgba(124,58,237, 0.05) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 45% at 52% 97%, rgba( 5,150,105, 0.04) 0%, transparent 55%);
+}
+
+[data-theme="midnight"] .glass-bg::after {
+  background:
+    radial-gradient(ellipse 70% 55% at  8% 12%, rgba(59,130,246, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 65% 50% at 90% 72%, rgba(99,102,241, 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse 55% 45% at 52% 97%, rgba(14,165,233, 0.07) 0%, transparent 55%);
+}
+
+@keyframes mesh-drift {
+  0%   {
+    background:
+      radial-gradient(ellipse 70% 55% at  8% 12%, rgba( 96,165,250, 0.11) 0%, transparent 60%),
+      radial-gradient(ellipse 65% 50% at 90% 72%, rgba(167,139,250, 0.09) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 52% 97%, rgba( 34,197, 94, 0.08) 0%, transparent 55%);
+  }
+  33%  {
+    background:
+      radial-gradient(ellipse 75% 60% at 25% 35%, rgba( 96,165,250, 0.11) 0%, transparent 60%),
+      radial-gradient(ellipse 65% 50% at 75% 20%, rgba(167,139,250, 0.09) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 15% 85%, rgba( 34,197, 94, 0.08) 0%, transparent 55%);
+  }
+  66%  {
+    background:
+      radial-gradient(ellipse 70% 55% at 60% 50%, rgba( 96,165,250, 0.10) 0%, transparent 60%),
+      radial-gradient(ellipse 65% 50% at 20% 80%, rgba(167,139,250, 0.09) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 85% 25%, rgba( 34,197, 94, 0.07) 0%, transparent 55%);
+  }
+  100% {
+    background:
+      radial-gradient(ellipse 70% 55% at 40% 20%, rgba( 96,165,250, 0.11) 0%, transparent 60%),
+      radial-gradient(ellipse 65% 50% at 65% 90%, rgba(167,139,250, 0.09) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 10% 60%, rgba( 34,197, 94, 0.08) 0%, transparent 55%);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GLASS MATERIAL CLASSES
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Base glass panel */
+.g {
+  background:     var(--gs) !important;
+  backdrop-filter:         var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border:      1px solid var(--ge) !important;
+  box-shadow:  var(--gsh), var(--glass-hi) !important;
+}
+
+/* Lighter glass (for nested panels) */
+.g2 {
+  background:     rgba(255,255,255, 0.05) !important;
+  backdrop-filter:         var(--glass-blur-sm) !important;
+  -webkit-backdrop-filter: var(--glass-blur-sm) !important;
+  border:      1px solid rgba(255,255,255, 0.07) !important;
+}
+[data-theme="light"] .g2,
+[data-theme="lightblue"] .g2 {
+  background: rgba(0,0,0, 0.04) !important;
+  border:     1px solid rgba(0,0,0, 0.06) !important;
+}
+
+/* Glass modal / bottom sheet */
+.g-sheet {
+  background:     rgba(14, 14, 28, 0.86) !important;
+  backdrop-filter:         var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border-top: 1px solid rgba(255,255,255, 0.10) !important;
+  box-shadow: 0 -8px 48px rgba(0,0,0,0.55), var(--glass-hi) !important;
+}
+[data-theme="light"] .g-sheet,
+[data-theme="lightblue"] .g-sheet {
+  background: rgba(246,246,248, 0.90) !important;
+  border-top: 1px solid rgba(0,0,0, 0.08) !important;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.14) !important;
+}
+
+/* Glass confirm / alert dialog */
+.g-dialog {
+  background:     rgba(22, 22, 40, 0.88) !important;
+  backdrop-filter:         var(--glass-blur) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  border: 1px solid rgba(255,255,255, 0.11) !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.65), var(--glass-hi) !important;
+}
+[data-theme="light"] .g-dialog,
+[data-theme="lightblue"] .g-dialog {
+  background:     rgba(250,250,252, 0.92) !important;
+  border: 1px solid rgba(0,0,0, 0.09) !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18) !important;
+}
+
+/* Glass toasts */
+.g-toast {
+  background:     rgba(22, 22, 40, 0.88) !important;
+  backdrop-filter:         var(--glass-blur-sm) !important;
+  -webkit-backdrop-filter: var(--glass-blur-sm) !important;
+  border: 1px solid rgba(255,255,255, 0.10) !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45), var(--glass-hi) !important;
+}
+[data-theme="light"] .g-toast,
+[data-theme="lightblue"] .g-toast {
+  background:     rgba(252,252,255, 0.92) !important;
+  border: 1px solid rgba(0,0,0, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FLOATING GLASS TAB BAR  (iOS 26 pill style)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.glass-tab-bar {
+  /* Floating pill positioning — overrides inline styles */
+  left:      50% !important;
+  right:     auto !important;
+  transform: translateX(-50%) !important;
+  bottom:    calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
+  width:     min(calc(100vw - 24px), 440px) !important;
+  margin:    0 !important;
+  padding:   7px 8px !important;
+
+  /* Glass material */
+  background:               rgba(14, 14, 26, 0.80) !important;
+  backdrop-filter:          blur(44px) saturate(200%) !important;
+  -webkit-backdrop-filter:  blur(44px) saturate(200%) !important;
+  border:       1px solid rgba(255, 255, 255, 0.10) !important;
+  border-top:   1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 28px !important;
+  box-shadow:   0 8px 44px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+
+[data-theme="light"] .glass-tab-bar,
+[data-theme="lightblue"] .glass-tab-bar {
+  background:              rgba(248, 248, 252, 0.85) !important;
+  border:      1px solid rgba(0, 0, 0, 0.08) !important;
+  border-top:  1px solid rgba(255,255,255, 0.80) !important;
+  box-shadow:  0 4px 28px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.85) !important;
+}
+
+/* Active tab item — dot under icon only, no fill */
+.tab-item-active {
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TYPOGRAPHY  (iOS 26 / SF Pro inspired)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.glass-bg * {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Display number — big stat cards, Apple Watch style */
+.stat-display {
+  font-family:    'Inter Display', 'Inter', -apple-system, sans-serif !important;
+  font-weight:    800 !important;
+  letter-spacing: -0.045em !important;
+  font-variant-numeric: tabular-nums;
+  line-height:    1.0 !important;
+}
+
+/* Large section title */
+.ios-large-title {
+  font-size:      34px;
+  font-weight:    800;
+  letter-spacing: -0.8px;
+  line-height:    1.1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   HERO CARD  (Health app summary card)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.hero-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px !important;
+}
+
+/* Specular sheen on top edge */
+.hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.20) 30%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.20) 70%, transparent 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Inner glow */
+.hero-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255,255,255,0.07) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TRANSACTION ROWS  (glass card style)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.tx-row-card {
+  background:    rgba(255,255,255,0.04) !important;
+  border:        1px solid rgba(255,255,255,0.07) !important;
+  border-radius: 18px !important;
+  margin-bottom: 8px !important;
+  padding:       13px 14px !important;
+  backdrop-filter:         blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  transition: transform 0.12s var(--ease), background 0.12s;
+}
+.tx-row-card:active {
+  transform:  scale(0.985);
+  background: rgba(255,255,255,0.07) !important;
+}
+
+[data-theme="light"] .tx-row-card,
+[data-theme="lightblue"] .tx-row-card {
+  background:    rgba(255,255,255,0.70) !important;
+  border:        1px solid rgba(0,0,0,0.06) !important;
+  box-shadow:    0 2px 12px rgba(0,0,0,0.06) !important;
+}
+[data-theme="light"] .tx-row-card:active,
+[data-theme="lightblue"] .tx-row-card:active {
+  background: rgba(0,0,0,0.04) !important;
+}
+
+/* Category icon container — glass pill */
+.cat-icon-glass {
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.10) !important;
+}
+[data-theme="light"] .cat-icon-glass,
+[data-theme="lightblue"] .cat-icon-glass {
+  border: 1px solid rgba(0,0,0,0.06) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.80) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CHART STYLES  (Apple Health / Watch ring style)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Chart wrapper cards */
+.chart-card {
+  border-radius: 22px !important;
+  overflow: hidden;
+}
+
+/* Recharts tooltip: glass style */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background:    rgba(18,18,36,0.90) !important;
+  backdrop-filter:         blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border:        1px solid rgba(255,255,255,0.10) !important;
+  border-radius: 14px !important;
+  box-shadow:    0 8px 32px rgba(0,0,0,0.40) !important;
+  font-family:   'Inter', sans-serif !important;
+  padding:       10px 14px !important;
+}
+
+.recharts-tooltip-label {
+  color: rgba(255,255,255,0.60) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  margin-bottom: 4px !important;
+}
+
+.recharts-tooltip-item {
+  color: #fff !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+}
+
+/* Recharts axes */
+.recharts-cartesian-axis-tick text {
+  font-family: 'Inter', sans-serif !important;
+  font-size:   10px !important;
+  fill:        rgba(235,235,245,0.45) !important;
+}
+
+[data-theme="light"] .recharts-cartesian-axis-tick text,
+[data-theme="lightblue"] .recharts-cartesian-axis-tick text {
+  fill: rgba(10,10,20,0.40) !important;
+}
+
+/* Activity ring glow */
+.ring-glow {
+  filter: drop-shadow(0 0 10px var(--ring-col, rgba(48,209,88,0.6)));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BUTTON STYLES  (iOS 26 capsule & glass)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Primary action — full iOS capsule */
+.ios-btn-primary {
+  border-radius: 999px !important;
+  font-weight:   700 !important;
+  font-family:   'Inter', sans-serif !important;
+  letter-spacing: -0.01em !important;
+  transition: transform 0.12s var(--spring), opacity 0.12s !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.14) !important;
+}
+.ios-btn-primary:active { transform: scale(0.96) !important; opacity: 0.88 !important; }
+
+/* Floating FAB — glowing ring */
+.ios-fab {
+  box-shadow: 0 0 0 6px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.14),
+              0 6px 28px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.45) !important;
+  transition: transform 0.18s var(--spring), box-shadow 0.18s !important;
+}
+.ios-fab:active {
+  transform:  translateY(-12px) scale(0.92) !important;
+  box-shadow: 0 0 0 3px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.10),
+              0 4px 16px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.35) !important;
+}
+
+/* Glass secondary button */
+.ios-btn-glass {
+  background:              rgba(255,255,255,0.08) !important;
+  backdrop-filter:         var(--glass-blur-sm) !important;
+  -webkit-backdrop-filter: var(--glass-blur-sm) !important;
+  border:       1px solid rgba(255,255,255,0.12) !important;
+  border-radius: 999px !important;
+  box-shadow:   inset 0 1px 0 rgba(255,255,255,0.10) !important;
+  transition:   transform 0.12s var(--spring), background 0.12s !important;
+}
+.ios-btn-glass:active { transform: scale(0.95) !important; background: rgba(255,255,255,0.14) !important; }
+
+[data-theme="light"] .ios-btn-glass,
+[data-theme="lightblue"] .ios-btn-glass {
+  background: rgba(0,0,0,0.06) !important;
+  border:     1px solid rgba(0,0,0,0.09) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INPUT STYLES  (iOS grouped / inline)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ios-input {
+  background:    rgba(255,255,255,0.07) !important;
+  border:        1px solid rgba(255,255,255,0.10) !important;
+  border-radius: 14px !important;
+  backdrop-filter:         blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  transition: border-color 0.18s, box-shadow 0.18s !important;
+}
+.ios-input:focus {
+  border-color: rgba(10,132,255,0.60) !important;
+  box-shadow:   0 0 0 3px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+  outline: none !important;
+}
+[data-theme="light"] .ios-input,
+[data-theme="lightblue"] .ios-input {
+  background: rgba(255,255,255,0.80) !important;
+  border:     1px solid rgba(0,0,0,0.10) !important;
+}
+[data-theme="light"] .ios-input:focus,
+[data-theme="lightblue"] .ios-input:focus {
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.16) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANIMATIONS  (iOS spring, blur, morph)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Tab content entrance */
+.tab-content {
+  animation: ios-tab-enter 0.38s var(--ease) both;
+}
+
+@keyframes ios-tab-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Sheet slide-up (bottom sheet) */
+@keyframes ios-sheet-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.ios-sheet-enter { animation: ios-sheet-up 0.42s var(--ease) both; }
+
+/* Spring pop (dialog, FAB) */
+@keyframes ios-spring-pop {
+  0%   { opacity: 0; transform: scale(0.88) translateY(14px); }
+  60%  { opacity: 1; transform: scale(1.03) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.ios-pop { animation: ios-spring-pop 0.40s var(--spring) both; }
+
+/* Notification entrance */
+@keyframes ios-notify-drop {
+  from { opacity: 0; transform: translateY(-28px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ios-notify { animation: ios-notify-drop 0.35s var(--spring) both; }
+
+/* Fade + blur in */
+@keyframes ios-blur-in {
+  from { opacity: 0; filter: blur(10px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+.ios-blur-in { animation: ios-blur-in 0.30s ease both; }
+
+/* Number counter spring */
+@keyframes ios-number-pop {
+  0%   { transform: scale(0.75); opacity: 0.4; }
+  65%  { transform: scale(1.06); }
+  100% { transform: scale(1);    opacity: 1; }
+}
+.num-pop { animation: ios-number-pop 0.45s var(--spring) both; }
+
+/* Toast animations */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-24px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-20px) scale(0.95); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MISCELLANEOUS UTILITIES
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Pill chip */
+.ios-pill {
+  border-radius: 999px !important;
+  transition: transform 0.12s var(--ease), background 0.15s !important;
+}
+.ios-pill:active { transform: scale(0.95) !important; }
+
+/* Skeleton shimmer */
+@keyframes bone-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Divider — subtle separator */
+.ios-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 0;
+}
+[data-theme="light"] .ios-sep,
+[data-theme="lightblue"] .ios-sep {
+  background: rgba(0,0,0,0.06);
+}
+
+/* Vibrancy label */
+.vibrant {
+  -webkit-backdrop-filter: blur(2px) brightness(1.3);
+  backdrop-filter:          blur(2px) brightness(1.3);
+}
+
+/* Content area z-index (above mesh but below modals) */
+.glass-content {
+  position: relative;
+  z-index:  1;
+}
+
+/* ── Ensure modals/sheets stack above mesh ── */
+[style*="z-index"] { position: relative; }
+
+/* ── Tab bar z-index ── */
+.glass-tab-bar { z-index: 99 !important; }

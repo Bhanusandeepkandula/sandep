@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./glass.css";
 import { applyTheme } from "./config.js";
 import { DialogProvider } from "./AppDialogs.jsx";
 import App from "./App.jsx";

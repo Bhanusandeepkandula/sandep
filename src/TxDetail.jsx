@@ -243,7 +243,7 @@ export function TxDetail({
   useEffect(() => () => { if (splitTimerRef.current) clearTimeout(splitTimerRef.current); }, []);
   function handleDelete() { onDelete(tx.id); onClose(); }
 
-  const sectionCard = { background: T.card, borderRadius: 14, border: `1px solid ${T.bdr}`, padding: 14, marginBottom: 10 };
+  const sectionCard = { background: "rgba(255,255,255,0.05)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderRadius: 18, border: `1px solid ${T.bdr}`, padding: 14, marginBottom: 10 };
   const detailRow = (label, value, extra) => value ? (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: `1px solid ${T.bdr}` }}>
       <span style={{ fontSize: 13, color: T.sub, flexShrink: 0 }}>{label}</span>
@@ -254,7 +254,7 @@ export function TxDetail({
   return (
     <>
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 9000, display: "flex", flexDirection: "column", justifyContent: "flex-end", animation: "fade-in .2s ease" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.surf, borderRadius: "20px 20px 0 0", maxHeight: "92vh", overflowY: "auto", WebkitOverflowScrolling: "touch", borderTop: `1px solid ${T.bdr}`, animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)" }}>
+      <div className="g-sheet" onClick={(e) => e.stopPropagation()} style={{ borderRadius: "28px 28px 0 0", maxHeight: "92vh", overflowY: "auto", WebkitOverflowScrolling: "touch", animation: "ios-sheet-up .42s cubic-bezier(.22,1,.36,1)" }}>
         {/* Handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}>
           <div style={{ width: 36, height: 4, borderRadius: 99, background: T.mut }} />
@@ -323,7 +323,7 @@ export function TxDetail({
               {/* Primary number is the *remaining* amount for whoever's looking — slaves see
                   what they still owe, master sees unrecovered spend. Full bill stays visible
                   as a muted sub-line so the original total isn't lost. */}
-              <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1, color: isFullySettled ? (T.grn || "#22c55e") : T.txt }}>
+              <div className="stat-display" style={{ fontSize: 36, color: isFullySettled ? (T.grn || "#30D158") : T.txt }}>
                 -{formatMoney(remainingAmt)}
               </div>
               {(isMirror ? (settledByMe > 0) : (masterSettledSum > 0)) ? (

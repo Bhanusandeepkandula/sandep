@@ -3180,11 +3180,12 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(96px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(116px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
     <div
+      className="glass-bg glass-content"
       style={{
         background: T.bg,
         color: T.txt,
@@ -3199,21 +3200,19 @@ export default function App({ onReady }) {
         paddingLeft: 0,
         paddingRight: 0,
         boxSizing: "border-box",
-        fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+        fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif",
         position: "relative",
         overflow: "hidden",
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
         *{box-sizing:border-box;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
-        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(${T.id === "light" ? "0" : "0.5"});}
+        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(${T.id === "light" || T.id === "lightblue" ? "0" : "0.6"});}
         select option{background:${T.card};color:${T.txt};}
         @keyframes spin{to{transform:rotate(360deg);}}
         .spin{animation:spin 1s linear infinite;}
         @keyframes pop{0%{transform:scale(0.8);opacity:0}100%{transform:scale(1);opacity:1}}
         .pop{animation:pop .3s ease-out;}
-        .tab-content{animation:tab-enter .25s ease-out;}
         button:active{transform:scale(0.97);transition:transform .08s;}
       `}</style>
 
@@ -3294,14 +3293,16 @@ export default function App({ onReady }) {
         )}
         {tab === "home" && !(fbStatus === "loading" && txs.length === 0) && (
           <div className="tab-content">
-            <div style={{ padding: `${px + 8}px ${px}px ${px}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ padding: `${px + 10}px ${px}px ${px - 2}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13, color: T.sub }}>{new Date().getHours() < 12 ? "Good Morning" : "Good Evening"} 👋</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: T.sub, letterSpacing: "-0.1px" }}>
+                  {new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 17 ? "Good afternoon" : "Good evening"}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1, minWidth: 0 }}>
                   <div
+                    className="ios-large-title"
                     style={{
-                      fontSize: comfortable ? 26 : 22,
-                      fontWeight: 800,
+                      fontSize: comfortable ? 32 : 28,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -3322,7 +3323,7 @@ export default function App({ onReady }) {
                       height: 26,
                       borderRadius: 8,
                       border: `1px solid ${T.bdr}`,
-                      background: T.card2,
+                      background: "rgba(255,255,255,0.06)",
                       color: T.sub,
                       display: "inline-flex",
                       alignItems: "center",
@@ -3338,53 +3339,56 @@ export default function App({ onReady }) {
               <button
                 type="button"
                 onClick={() => setTab("profile")}
+                className="ios-btn-glass"
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 12,
-                  background: T.card,
-                  border: `1px solid ${T.bdr}`,
+                  width: 42,
+                  height: 42,
+                  borderRadius: 13,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
+                  border: "none",
+                  background: "transparent",
                 }}
               >
-                <User size={17} color={T.sub} />
+                <User size={18} color={T.sub} />
               </button>
             </div>
 
             <div
+              className="g hero-card"
               style={{
                 margin: `0 ${px}px 14px`,
-                background: T.heroGrad,
                 borderRadius: T.rLg,
                 padding: 22,
-                border: `1px solid ${T.bdr}`,
                 position: "relative",
                 overflow: "hidden",
               }}
             >
+              {/* Decorative colour orbs inside card */}
               <div
                 style={{
                   position: "absolute",
-                  right: -20,
-                  top: -20,
-                  width: 130,
-                  height: 130,
+                  right: -24,
+                  top: -24,
+                  width: 140,
+                  height: 140,
                   borderRadius: "50%",
                   background: T.adim,
+                  pointerEvents: "none",
                 }}
               />
               <div
                 style={{
                   position: "absolute",
-                  right: 20,
-                  bottom: -30,
-                  width: 90,
-                  height: 90,
+                  right: 16,
+                  bottom: -36,
+                  width: 100,
+                  height: 100,
                   borderRadius: "50%",
                   background: T.bdim,
+                  pointerEvents: "none",
                 }}
               />
               <div
@@ -3397,8 +3401,8 @@ export default function App({ onReady }) {
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 3 }}>This Month</div>
-                  <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: "-1.5px", lineHeight: 1.1 }}>{formatMoney(monthTotal)}</div>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 4, letterSpacing: "-0.1px" }}>This Month</div>
+                  <div className="stat-display" style={{ fontSize: 42, lineHeight: 1.0, marginBottom: 2 }}>{formatMoney(monthTotal)}</div>
                   <div style={{ fontSize: 11, color: T.mut, marginTop: 4, lineHeight: 1.35 }}>
                     Only spending dated in {calendarMonthLabel}. Imports keep the date from the bank or receipt.
                   </div>
@@ -3460,15 +3464,22 @@ export default function App({ onReady }) {
                   </button>
                 ) : null}
               </div>
-              <div style={{ display: "flex", gap: 12 }}>
-                <div style={{ flex: 1, background: T.id === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
-                  <div style={{ fontSize: 11, color: T.sub, marginBottom: 3 }}>Today</div>
-                  <div style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(todayTotal)}</div>
-                </div>
-                <div style={{ flex: 1, background: T.id === "light" ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)", borderRadius: 12, padding: "10px 14px" }}>
-                  <div style={{ fontSize: 11, color: T.sub, marginBottom: 3 }}>This Week</div>
-                  <div style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(weekTotal)}</div>
-                </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[
+                  { label: "Today", val: todayTotal },
+                  { label: "This Week", val: weekTotal },
+                ].map((s) => (
+                  <div key={s.label} style={{
+                    flex: 1,
+                    background: T.id === "light" || T.id === "lightblue" ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.06)",
+                    borderRadius: 14,
+                    padding: "10px 14px",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                  }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 3, letterSpacing: "-0.1px" }}>{s.label}</div>
+                    <div className="stat-display" style={{ fontSize: 18 }}>{formatMoney(s.val)}</div>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -6064,12 +6075,12 @@ export default function App({ onReady }) {
           }}
         >
           <div
+            className="g-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
               maxWidth: maxShell,
-              background: T.card,
-              borderRadius: "20px 20px 0 0",
+              borderRadius: "28px 28px 0 0",
               padding: 24,
               paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
@@ -6193,6 +6204,7 @@ export default function App({ onReady }) {
           }}
         >
           <div
+            className="g-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
@@ -6200,8 +6212,7 @@ export default function App({ onReady }) {
               maxHeight: "90dvh",
               overflowY: "auto",
               WebkitOverflowScrolling: "touch",
-              background: T.card,
-              borderRadius: "20px 20px 0 0",
+              borderRadius: "28px 28px 0 0",
               padding: 24,
               paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
@@ -6297,6 +6308,7 @@ export default function App({ onReady }) {
           onClick={(e) => { if (e.target === e.currentTarget) setShowFixedModal(false); }}
         >
           <div
+            className="g-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
@@ -6304,12 +6316,11 @@ export default function App({ onReady }) {
               maxHeight: "90dvh",
               overflowY: "auto",
               WebkitOverflowScrolling: "touch",
-              background: T.card,
-              borderRadius: "20px 20px 0 0",
+              borderRadius: "28px 28px 0 0",
               padding: 24,
               paddingBottom: "max(28px, calc(20px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
-              animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)",
+              animation: "ios-sheet-up .42s cubic-bezier(.22,1,.36,1)",
             }}
           >
             <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 18, display: "flex", alignItems: "center", gap: 8 }}>
@@ -6436,6 +6447,7 @@ export default function App({ onReady }) {
           onClick={(e) => { if (e.target === e.currentTarget) setShowCurrencyPicker(false); }}
         >
           <div
+            className="g-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "100%",
@@ -6443,12 +6455,11 @@ export default function App({ onReady }) {
               maxHeight: "80dvh",
               overflowY: "auto",
               WebkitOverflowScrolling: "touch",
-              background: T.card,
-              borderRadius: "20px 20px 0 0",
+              borderRadius: "28px 28px 0 0",
               padding: "20px 0 0",
               paddingBottom: "max(20px, calc(12px + env(safe-area-inset-bottom, 0px)))",
               boxSizing: "border-box",
-              animation: "sheet-up .3s cubic-bezier(.22,1,.36,1)",
+              animation: "ios-sheet-up .42s cubic-bezier(.22,1,.36,1)",
             }}
           >
             <div style={{ padding: "0 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -6818,58 +6829,47 @@ export default function App({ onReady }) {
         </div>
       ) : null}
 
+      {/* ── iOS 26 Floating Glass Tab Bar ── */}
       <div
+        className="glass-tab-bar"
         style={{
           position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          width: "100%",
-          maxWidth: maxShell,
-          marginLeft: "auto",
-          marginRight: "auto",
-          background: `${T.surf}F0`,
-          backdropFilter: "blur(24px)",
-          borderTop: `1px solid ${T.bdr}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-around",
-          padding: `8px 4px ${safeBottom}`,
-          zIndex: 99,
           boxSizing: "border-box",
+          zIndex: 99,
         }}
       >
         {[
-          { id: "home", icon: <Home size={20} />, label: "Home" },
-          { id: "analytics", icon: <BarChart2 size={20} />, label: "Analytics" },
-          { id: "ADD", icon: null, label: "" },
-          { id: "reports", icon: <BrainCircuit size={20} />, label: "Reports" },
-          { id: "budgets", icon: <Wallet size={20} />, label: "Budgets" },
+          { id: "home",      icon: <Home size={22} />,       label: "Home"      },
+          { id: "analytics", icon: <BarChart2 size={22} />,   label: "Analytics" },
+          { id: "ADD",       icon: null,                       label: ""          },
+          { id: "reports",   icon: <BrainCircuit size={22} />, label: "Reports"  },
+          { id: "budgets",   icon: <Wallet size={22} />,       label: "Budgets"  },
         ].map((item) => {
           if (item.id === "ADD")
             return (
               <button
                 type="button"
                 key="add"
-                onClick={() => {
-                  setTab("add");
-                  setStep("mode");
-                }}
+                className="ios-fab"
+                onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 58,
-                  height: 58,
+                  width: 52,
+                  height: 52,
                   borderRadius: "50%",
-                  background: T.acc,
+                  background: `linear-gradient(145deg, ${T.acc}, ${T.acc}CC)`,
                   border: "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  boxShadow: `0 4px 22px ${T.acc}73`,
-                  transform: "translateY(-12px)",
+                  transform: "translateY(-10px)",
+                  flexShrink: 0,
                 }}
               >
-                <Plus size={28} color={T.btnTxt} strokeWidth={3} />
+                <Plus size={26} color={T.btnTxt} strokeWidth={2.8} />
               </button>
             );
           const active = tab === item.id;
@@ -6878,6 +6878,7 @@ export default function App({ onReady }) {
               type="button"
               key={item.id}
               onClick={() => setTab(item.id)}
+              className={active ? "tab-item-active" : ""}
               style={{
                 flex: 1,
                 display: "flex",
@@ -6886,14 +6887,30 @@ export default function App({ onReady }) {
                 gap: 3,
                 background: "none",
                 border: "none",
-                color: active ? T.acc : T.mut,
+                color: active ? T.acc : T.sub,
                 cursor: "pointer",
-                padding: "4px 0",
-                transition: "color .15s",
+                padding: "4px 2px",
+                transition: "color .18s cubic-bezier(0.22,1,0.36,1)",
+                minWidth: 0,
               }}
             >
-              {item.icon}
-              <span style={{ fontSize: 10, fontWeight: active ? 700 : 400 }}>{item.label}</span>
+              <span style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36,
+                height: 28,
+              }}>
+                {item.icon}
+              </span>
+              <span style={{
+                fontSize: 10,
+                fontWeight: active ? 700 : 500,
+                letterSpacing: "-0.2px",
+                marginTop: 1,
+              }}>
+                {item.label}
+              </span>
             </button>
           );
         })}

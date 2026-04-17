@@ -184,38 +184,39 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   FLOATING GLASS TAB BAR  (iOS 26 pill style)
+   GLASS TAB BAR  (iOS 26 — full-width, rounded top, glass material)
    ═══════════════════════════════════════════════════════════════════════ */
 
 .glass-tab-bar {
-  /* Floating pill positioning — overrides inline styles */
+  /* Full-width flush-to-bottom — kills the safe-area black gap */
   left:      50% !important;
   right:     auto !important;
+  bottom:    0 !important;
   transform: translateX(-50%) !important;
-  bottom:    calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
-  width:     min(calc(100vw - 24px), 440px) !important;
+  width:     min(100vw, 440px) !important;
   margin:    0 !important;
-  padding:   7px 8px !important;
+  /* Padding pushes items above home indicator */
+  padding:   8px 8px env(safe-area-inset-bottom, 12px) !important;
 
-  /* Glass material */
-  background:               rgba(14, 14, 26, 0.80) !important;
-  backdrop-filter:          blur(44px) saturate(200%) !important;
-  -webkit-backdrop-filter:  blur(44px) saturate(200%) !important;
-  border:       1px solid rgba(255, 255, 255, 0.10) !important;
-  border-top:   1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 28px !important;
-  box-shadow:   0 8px 44px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+  /* Glass — only top corners rounded */
+  background:              rgba(10, 10, 20, 0.84) !important;
+  backdrop-filter:         blur(44px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(200%) !important;
+  border-radius: 20px 20px 0 0 !important;
+  border:     none !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07) !important;
 }
 
 [data-theme="light"] .glass-tab-bar,
 [data-theme="lightblue"] .glass-tab-bar {
-  background:              rgba(248, 248, 252, 0.85) !important;
-  border:      1px solid rgba(0, 0, 0, 0.08) !important;
-  border-top:  1px solid rgba(255,255,255, 0.80) !important;
-  box-shadow:  0 4px 28px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.85) !important;
+  background:  rgba(248, 248, 253, 0.90) !important;
+  border-top:  1px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow:  0 -2px 16px rgba(0,0,0,0.08),
+               inset 0 1px 0 rgba(255,255,255,0.90) !important;
 }
 
-/* Active tab item — dot under icon only, no fill */
+/* Active tab item */
 .tab-item-active {
   position: relative;
 }
@@ -285,11 +286,9 @@
 .tx-row-card {
   background:    rgba(255,255,255,0.04) !important;
   border:        1px solid rgba(255,255,255,0.07) !important;
-  border-radius: 18px !important;
-  margin-bottom: 8px !important;
-  padding:       13px 14px !important;
-  backdrop-filter:         blur(16px) !important;
-  -webkit-backdrop-filter: blur(16px) !important;
+  border-radius: 14px !important;
+  margin-bottom: 7px !important;
+  padding:       11px 13px !important;
   transition: transform 0.12s var(--ease), background 0.12s;
 }
 .tx-row-card:active {
@@ -386,16 +385,14 @@
 }
 .ios-btn-primary:active { transform: scale(0.96) !important; opacity: 0.88 !important; }
 
-/* Floating FAB — glowing ring */
+/* FAB — clean shadow, no ring */
 .ios-fab {
-  box-shadow: 0 0 0 6px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.14),
-              0 6px 28px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.45) !important;
-  transition: transform 0.18s var(--spring), box-shadow 0.18s !important;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.35) !important;
+  transition: transform 0.16s var(--spring), box-shadow 0.16s !important;
 }
 .ios-fab:active {
-  transform:  translateY(-12px) scale(0.92) !important;
-  box-shadow: 0 0 0 3px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.10),
-              0 4px 16px rgba(var(--fab-col-r,34),var(--fab-col-g,197),var(--fab-col-b,94), 0.35) !important;
+  transform:  scale(0.90) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25) !important;
 }
 
 /* Glass secondary button */
@@ -549,3 +546,121 @@
 
 /* ── Tab bar z-index ── */
 .glass-tab-bar { z-index: 99 !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SCAN / PROCESSING OVERLAY  (receipt scan loading screen)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.g-scan-loader {
+  background:              rgba(8, 8, 18, 0.97) !important;
+  backdrop-filter:         blur(48px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(200%) !important;
+}
+[data-theme="light"] .g-scan-loader,
+[data-theme="lightblue"] .g-scan-loader {
+  background: rgba(242, 242, 250, 0.97) !important;
+}
+
+/* Glass card wrapping the step list */
+.scan-steps-card {
+  background:    rgba(255, 255, 255, 0.06);
+  border:        1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  overflow:      hidden;
+  width:         100%;
+  max-width:     340px;
+}
+[data-theme="light"] .scan-steps-card,
+[data-theme="lightblue"] .scan-steps-card {
+  background:    rgba(0, 0, 0, 0.04);
+  border:        1px solid rgba(0, 0, 0, 0.07);
+}
+
+/* Each step row inside the scan card */
+.scan-step-row {
+  display:        flex;
+  align-items:    center;
+  gap:            14px;
+  padding:        14px 18px;
+  transition:     background 0.2s;
+}
+.scan-step-row + .scan-step-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+[data-theme="light"] .scan-step-row + .scan-step-row,
+[data-theme="lightblue"] .scan-step-row + .scan-step-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.scan-step-row.active {
+  background: rgba(255, 255, 255, 0.05);
+}
+[data-theme="light"] .scan-step-row.active,
+[data-theme="lightblue"] .scan-step-row.active {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* Spinning arc for scan progress */
+@keyframes scan-arc-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes scan-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.95); }
+}
+.scan-arc {
+  animation: scan-arc-spin 0.9s linear infinite;
+}
+.scan-icon-pulse {
+  animation: scan-pulse 1.8s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TRANSACTION DETAIL  (bottom sheet interior)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Hero section glass card */
+.tx-detail-hero {
+  background:              rgba(255, 255, 255, 0.05);
+  backdrop-filter:         blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border:        1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 24px;
+  position:      relative;
+  overflow:      hidden;
+}
+.tx-detail-hero::before {
+  content: '';
+  position:   absolute;
+  top: 0; left: 0; right: 0;
+  height:     1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 30%, rgba(255,255,255,0.28) 50%, rgba(255,255,255,0.14) 70%, transparent 100%);
+  pointer-events: none;
+}
+[data-theme="light"] .tx-detail-hero,
+[data-theme="lightblue"] .tx-detail-hero {
+  background:    rgba(255, 255, 255, 0.75);
+  border:        1px solid rgba(0, 0, 0, 0.07);
+  box-shadow:    0 4px 24px rgba(0, 0, 0, 0.07);
+}
+
+/* Info / split section cards */
+.tx-section-card {
+  background:    rgba(255, 255, 255, 0.05);
+  border:        1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding:       14px;
+  margin-bottom: 10px;
+}
+[data-theme="light"] .tx-section-card,
+[data-theme="lightblue"] .tx-section-card {
+  background:    rgba(255, 255, 255, 0.75);
+  border:        1px solid rgba(0, 0, 0, 0.07);
+  box-shadow:    0 2px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Accent split card (has coloured tint) */
+.tx-section-card-accent {
+  border-radius: 18px;
+  padding:       14px;
+  margin-bottom: 10px;
+}

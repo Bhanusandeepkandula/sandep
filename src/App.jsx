@@ -3180,7 +3180,7 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(116px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(92px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
@@ -6854,20 +6854,20 @@ export default function App({ onReady }) {
                 className="ios-fab"
                 onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   borderRadius: "50%",
-                  background: `linear-gradient(145deg, ${T.acc}, ${T.acc}CC)`,
+                  background: T.acc,
                   border: "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  transform: "translateY(-10px)",
+                  transform: "translateY(-14px)",
                   flexShrink: 0,
                 }}
               >
-                <Plus size={26} color={T.btnTxt} strokeWidth={2.8} />
+                <Plus size={24} color={T.btnTxt} strokeWidth={2.8} />
               </button>
             );
           const active = tab === item.id;

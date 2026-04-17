@@ -126,22 +126,22 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 .glass-tab-bar {
-  /* Floating pill: hugs screen bottom + matches phone-screen corner radius */
-  left:      50% !important;
-  right:     auto !important;
-  transform: translateX(-50%) !important;
-  bottom:    calc(env(safe-area-inset-bottom, 0px) + 4px) !important;
-  width:     min(calc(100vw - 14px), 460px) !important;
-  margin:    0 !important;
-  padding:   8px 10px !important;
+  /* Docked nav: full width, flush to the bottom edge */
+  left:       0 !important;
+  right:      0 !important;
+  transform:  none !important;
+  bottom:     0 !important;
+  width:      100% !important;
+  margin:     0 !important;
+  padding:    6px 10px calc(env(safe-area-inset-bottom, 0px) + 8px) !important;
 
   background:    var(--tabbar-bg) !important;
   backdrop-filter:         blur(24px) saturate(170%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
-  border:        1px solid var(--ge) !important;
-  /* iOS device screen-corner radius (~38–44px on modern iPhones) */
-  border-radius: 38px !important;
-  box-shadow:    0 8px 32px rgba(0,0,0,0.40), var(--glass-hi) !important;
+  border:        none !important;
+  border-top:    1px solid var(--ge) !important;
+  border-radius: 0 !important;
+  box-shadow:    none !important;
 }
 
 /* Active tab item — dot under icon only, no fill */

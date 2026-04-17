@@ -40,7 +40,7 @@ export function HomeSkeleton({ px = 20 }) {
         </div>
         <Bone w={40} h={40} r={12} />
       </div>
-      <div style={{ background: T.heroGrad, borderRadius: 20, padding: 22, border: `1px solid ${T.bdr}`, marginBottom: 14 }}>
+      <div style={{ background: T.heroGrad, borderRadius: T.rLg, padding: 22, border: `1px solid ${T.bdr}`, marginBottom: 14 }}>
         <Bone w={90} h={12} mb={6} />
         <Bone w={200} h={36} r={8} mb={10} />
         <Bone w="80%" h={10} mb={16} />

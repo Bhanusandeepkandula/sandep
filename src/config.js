@@ -1,98 +1,99 @@
-/* ─── THEME SYSTEM ────────────────────────────────────────────────────── */
+/* ─── THEME SYSTEM ──────────────────────────────────────────────────────
+ * Radii are intentionally medium (r: 10 / rLg: 14) — tight, modern, and
+ * readable without looking over-rounded. heroGrad is just the bg colour
+ * (no linear-gradient) so every screen reads as a single plain surface.
+ */
 
 const THEMES = {
-  /* iOS 26 Liquid Glass — true black base with system colours */
   default: {
-    id: "default", name: "iOS 26", preview: ["#000000", "#1C1C1E", "#30D158"],
-    bg: "#000000", surf: "#080808", card: "#111114", card2: "#1C1C1E",
-    bdr: "rgba(255,255,255,0.09)", bdrH: "rgba(255,255,255,0.16)",
-    acc: "#30D158", adim: "rgba(48,209,88,0.13)",
-    warn: "#FF9F0A", wdim: "rgba(255,159,10,0.12)",
-    dng: "#FF453A", ddim: "rgba(255,69,58,0.12)",
-    blue: "#0A84FF", bdim: "rgba(10,132,255,0.13)",
-    purp: "#BF5AF2", pdim: "rgba(191,90,242,0.12)",
-    grn: "#30D158",
-    txt: "#FFFFFF", sub: "rgba(235,235,245,0.55)", mut: "rgba(255,255,255,0.12)",
+    id: "default", name: "Deep Space", preview: ["#060610", "#12122A", "#22C55E"],
+    bg: "#060610", surf: "#0C0C1A", card: "#12122A", card2: "#1A1A30",
+    bdr: "#20203E", bdrH: "#2E2E55",
+    acc: "#22C55E", adim: "rgba(34,197,94,0.13)",
+    warn: "#F59E0B", wdim: "rgba(245,158,11,0.11)",
+    dng: "#EF4444", ddim: "rgba(239,68,68,0.11)",
+    blue: "#60A5FA", bdim: "rgba(96,165,250,0.11)",
+    purp: "#A78BFA", pdim: "rgba(167,139,250,0.11)",
+    grn: "#22C55E",
+    txt: "#F1F1F8", sub: "#7878A0", mut: "#2E2E55",
     btnTxt: "#000000",
-    heroGrad: "linear-gradient(145deg,#161620 0%,#0A0A10 100%)",
-    r: 16, rLg: 24,
+    heroGrad: "#12122A",
+    r: 10, rLg: 14,
   },
   midnight: {
-    id: "midnight", name: "Midnight Blue", preview: ["#04070E", "#0B1220", "#0A84FF"],
+    id: "midnight", name: "Midnight", preview: ["#04070E", "#0B1220", "#3B82F6"],
     bg: "#04070E", surf: "#080E1A", card: "#0B1220", card2: "#10182B",
-    bdr: "rgba(255,255,255,0.08)", bdrH: "rgba(255,255,255,0.14)",
-    acc: "#0A84FF", adim: "rgba(10,132,255,0.14)",
-    warn: "#FF9F0A", wdim: "rgba(255,159,10,0.12)",
-    dng: "#FF453A", ddim: "rgba(255,69,58,0.12)",
-    blue: "#0A84FF", bdim: "rgba(10,132,255,0.12)",
-    purp: "#BF5AF2", pdim: "rgba(191,90,242,0.12)",
-    grn: "#30D158",
-    txt: "#FFFFFF", sub: "rgba(235,235,245,0.50)", mut: "rgba(255,255,255,0.10)",
+    bdr: "#162038", bdrH: "#1E2E4A",
+    acc: "#3B82F6", adim: "rgba(59,130,246,0.15)",
+    warn: "#F59E0B", wdim: "rgba(245,158,11,0.12)",
+    dng: "#EF4444", ddim: "rgba(239,68,68,0.12)",
+    blue: "#60A5FA", bdim: "rgba(96,165,250,0.12)",
+    purp: "#818CF8", pdim: "rgba(129,140,248,0.12)",
+    grn: "#22C55E",
+    txt: "#DEE5F0", sub: "#4E6888", mut: "#1E2E4A",
     btnTxt: "#FFFFFF",
-    heroGrad: "linear-gradient(145deg,#0E1628 0%,#060C18 100%)",
-    r: 16, rLg: 24,
+    heroGrad: "#0B1220",
+    r: 10, rLg: 14,
   },
   grey: {
-    id: "grey", name: "Titanium", preview: ["#0A0A0A", "#1C1C1E", "#30D158"],
-    bg: "#0A0A0A", surf: "#101010", card: "#1C1C1E", card2: "#2C2C2E",
-    bdr: "rgba(255,255,255,0.09)", bdrH: "rgba(255,255,255,0.14)",
-    acc: "#30D158", adim: "rgba(48,209,88,0.13)",
-    warn: "#FF9F0A", wdim: "rgba(255,159,10,0.12)",
-    dng: "#FF453A", ddim: "rgba(255,69,58,0.12)",
-    blue: "#0A84FF", bdim: "rgba(10,132,255,0.12)",
-    purp: "#BF5AF2", pdim: "rgba(191,90,242,0.12)",
-    grn: "#30D158",
-    txt: "#EBEBF5", sub: "rgba(235,235,245,0.50)", mut: "rgba(255,255,255,0.11)",
+    id: "grey", name: "Dark Grey", preview: ["#101010", "#1C1C1C", "#10B981"],
+    bg: "#101010", surf: "#161616", card: "#1C1C1C", card2: "#242424",
+    bdr: "#303030", bdrH: "#404040",
+    acc: "#10B981", adim: "rgba(16,185,129,0.14)",
+    warn: "#F59E0B", wdim: "rgba(245,158,11,0.12)",
+    dng: "#EF4444", ddim: "rgba(239,68,68,0.12)",
+    blue: "#60A5FA", bdim: "rgba(96,165,250,0.12)",
+    purp: "#A78BFA", pdim: "rgba(167,139,250,0.12)",
+    grn: "#22C55E",
+    txt: "#E4E4E4", sub: "#7A7A7A", mut: "#404040",
     btnTxt: "#000000",
-    heroGrad: "linear-gradient(145deg,#1C1C1E 0%,#0D0D0D 100%)",
-    r: 16, rLg: 24,
+    heroGrad: "#1C1C1C",
+    r: 10, rLg: 14,
   },
   jetblack: {
-    id: "jetblack", name: "Deep Black", preview: ["#000000", "#0A0A0A", "#BF5AF2"],
-    bg: "#000000", surf: "#030303", card: "#0D0D0D", card2: "#141414",
-    bdr: "rgba(255,255,255,0.08)", bdrH: "rgba(255,255,255,0.13)",
-    acc: "#BF5AF2", adim: "rgba(191,90,242,0.13)",
-    warn: "#FF9F0A", wdim: "rgba(255,159,10,0.12)",
-    dng: "#FF453A", ddim: "rgba(255,69,58,0.11)",
-    blue: "#0A84FF", bdim: "rgba(10,132,255,0.11)",
-    purp: "#BF5AF2", pdim: "rgba(191,90,242,0.11)",
-    grn: "#30D158",
-    txt: "#EBEBF5", sub: "rgba(235,235,245,0.45)", mut: "rgba(255,255,255,0.10)",
-    btnTxt: "#FFFFFF",
-    heroGrad: "linear-gradient(145deg,#0D0D0D 0%,#000000 100%)",
-    r: 16, rLg: 24,
+    id: "jetblack", name: "Jet Black", preview: ["#000000", "#0A0A0A", "#22C55E"],
+    bg: "#000000", surf: "#030303", card: "#0A0A0A", card2: "#111111",
+    bdr: "#1A1A1A", bdrH: "#252525",
+    acc: "#22C55E", adim: "rgba(34,197,94,0.12)",
+    warn: "#EAB308", wdim: "rgba(234,179,8,0.12)",
+    dng: "#EF4444", ddim: "rgba(239,68,68,0.10)",
+    blue: "#60A5FA", bdim: "rgba(96,165,250,0.10)",
+    purp: "#A78BFA", pdim: "rgba(167,139,250,0.10)",
+    grn: "#22C55E",
+    txt: "#ECECEC", sub: "#5C5C5C", mut: "#252525",
+    btnTxt: "#000000",
+    heroGrad: "#0A0A0A",
+    r: 10, rLg: 14,
   },
-  /* iOS 26 Light — frosted glass over warm white */
   light: {
-    id: "light", name: "Pearl", preview: ["#F2F2F7", "#FFFFFF", "#30D158"],
-    bg: "#F2F2F7", surf: "#FFFFFF", card: "#FFFFFF", card2: "#F2F2F7",
-    bdr: "rgba(0,0,0,0.08)", bdrH: "rgba(0,0,0,0.13)",
-    acc: "#34C759", adim: "rgba(52,199,89,0.10)",
-    warn: "#FF9500", wdim: "rgba(255,149,0,0.10)",
-    dng: "#FF3B30", ddim: "rgba(255,59,48,0.09)",
-    blue: "#007AFF", bdim: "rgba(0,122,255,0.10)",
-    purp: "#AF52DE", pdim: "rgba(175,82,222,0.10)",
-    grn: "#34C759",
-    txt: "#000000", sub: "rgba(60,60,67,0.60)", mut: "rgba(60,60,67,0.18)",
+    id: "light", name: "Light", preview: ["#F4F5F8", "#FFFFFF", "#16A34A"],
+    bg: "#F4F5F8", surf: "#ECEDF1", card: "#FFFFFF", card2: "#F0F1F5",
+    bdr: "#D2D4DC", bdrH: "#B5B8C2",
+    acc: "#16A34A", adim: "rgba(22,163,74,0.10)",
+    warn: "#D97706", wdim: "rgba(217,119,6,0.10)",
+    dng: "#DC2626", ddim: "rgba(220,38,38,0.08)",
+    blue: "#2563EB", bdim: "rgba(37,99,235,0.10)",
+    purp: "#7C3AED", pdim: "rgba(124,58,237,0.10)",
+    grn: "#16A34A",
+    txt: "#18182B", sub: "#5D6374", mut: "#B5B8C2",
     btnTxt: "#FFFFFF",
-    heroGrad: "linear-gradient(145deg,#FFFFFF 0%,#F2F2F7 100%)",
-    r: 16, rLg: 24,
+    heroGrad: "#FFFFFF",
+    r: 10, rLg: 14,
   },
-  /* iOS 26 Light Blue — sky tints */
   lightblue: {
-    id: "lightblue", name: "Sky Glass", preview: ["#EEF6FF", "#FFFFFF", "#007AFF"],
-    bg: "#EEF6FF", surf: "#F8FAFE", card: "#FFFFFF", card2: "#EEF4FD",
-    bdr: "rgba(0,0,0,0.07)", bdrH: "rgba(0,0,0,0.12)",
-    acc: "#007AFF", adim: "rgba(0,122,255,0.10)",
-    warn: "#FF9500", wdim: "rgba(255,149,0,0.10)",
-    dng: "#FF3B30", ddim: "rgba(255,59,48,0.09)",
-    blue: "#007AFF", bdim: "rgba(0,122,255,0.10)",
-    purp: "#AF52DE", pdim: "rgba(175,82,222,0.10)",
-    grn: "#34C759",
-    txt: "#000000", sub: "rgba(60,60,67,0.55)", mut: "rgba(0,0,0,0.12)",
+    id: "lightblue", name: "Light Blue", preview: ["#F6F9FF", "#FFFFFF", "#2563EB"],
+    bg: "#F6F9FF", surf: "#EEF3FC", card: "#FFFFFF", card2: "#F1F5FC",
+    bdr: "#DCE4F3", bdrH: "#BFD0EC",
+    acc: "#2563EB", adim: "rgba(37,99,235,0.10)",
+    warn: "#D97706", wdim: "rgba(217,119,6,0.10)",
+    dng: "#DC2626", ddim: "rgba(220,38,38,0.09)",
+    blue: "#2563EB", bdim: "rgba(37,99,235,0.10)",
+    purp: "#7C3AED", pdim: "rgba(124,58,237,0.10)",
+    grn: "#16A34A",
+    txt: "#0F172A", sub: "#475569", mut: "#CBD5E1",
     btnTxt: "#FFFFFF",
-    heroGrad: "linear-gradient(145deg,#E8F4FF 0%,#F4FAFF 100%)",
-    r: 16, rLg: 24,
+    heroGrad: "#FFFFFF",
+    r: 10, rLg: 14,
   },
 };
 
@@ -130,10 +131,10 @@ export function applyTheme(name) {
   const theme = THEMES[name] || THEMES.default;
   Object.assign(T, theme);
   card.background = T.card;
-  card.borderRadius = T.rLg;
+  card.borderRadius = T.r;
   card.border = `1px solid ${T.bdr}`;
   card2.background = T.card2;
-  card2.borderRadius = T.rLg;
+  card2.borderRadius = T.r;
   card2.border = `1px solid ${T.bdr}`;
   inp.background = T.card2;
   inp.border = `1px solid ${T.bdr}`;
@@ -142,7 +143,6 @@ export function applyTheme(name) {
   lbl.color = T.sub;
   document.body.style.background = T.bg;
   document.body.style.color = T.txt;
-  // data-theme enables CSS glass variants
   document.body.setAttribute("data-theme", T.id || "default");
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", T.bg);

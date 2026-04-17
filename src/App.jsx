@@ -3180,7 +3180,7 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(88px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(116px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
@@ -3791,7 +3791,6 @@ export default function App({ onReady }) {
                 aria-modal="true"
                 aria-busy="true"
                 aria-label="Scanning receipt"
-                className="g-scan-loader"
                 style={{
                   position: "fixed",
                   inset: 0,
@@ -3799,6 +3798,8 @@ export default function App({ onReady }) {
                   maxWidth: maxShell,
                   marginLeft: "auto",
                   marginRight: "auto",
+                  background: T.id === "light" ? "rgba(240,240,245,0.98)" : "rgba(10,10,22,0.96)",
+                  backdropFilter: "blur(8px)",
                   display: "flex",
                   flexDirection: "column",
                   paddingTop: safeTop,
@@ -3829,55 +3830,28 @@ export default function App({ onReady }) {
                   <ArrowLeft size={20} /> Cancel scan
                 </button>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: 0 }}>
-                  {/* iOS-style arc ring */}
-                  <div style={{ position: "relative", width: 72, height: 72, marginBottom: 24 }}>
-                    {/* Track ring */}
-                    <svg width="72" height="72" style={{ position: "absolute", inset: 0 }}>
-                      <circle cx="36" cy="36" r="30" fill="none" stroke={T.bdr} strokeWidth="3" />
-                    </svg>
-                    {/* Spinning arc */}
-                    <svg width="72" height="72" className="scan-arc" style={{ position: "absolute", inset: 0 }}>
-                      <circle cx="36" cy="36" r="30" fill="none" stroke={T.acc} strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeDasharray="60 128"
-                        strokeDashoffset="0"
-                      />
-                    </svg>
-                    {/* Centre icon */}
-                    <div style={{
-                      position: "absolute", inset: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      <div className="scan-icon-pulse" style={{
-                        width: 36, height: 36, borderRadius: 10,
-                        background: `${T.acc}18`,
-                        border: `1px solid ${T.acc}44`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        <ScanLine size={18} color={T.acc} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 6, letterSpacing: "-0.4px" }}>Scanning receipt…</div>
-                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 28, lineHeight: 1.5, maxWidth: 280 }}>
+                  <div
+                    className="spin"
+                    style={{
+                      width: 48,
+                      height: 48,
+                      border: `3px solid ${T.bdr}`,
+                      borderTopColor: T.acc,
+                      borderRadius: "50%",
+                      marginBottom: 20,
+                    }}
+                  />
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Scanning receipt…</div>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 24, lineHeight: 1.45, maxWidth: 300 }}>
                     Large photos or a slow connection can take 30–60 seconds. Keep this screen open.
                   </div>
-
-                  {/* Step progress card */}
-                  <div className="scan-steps-card">
+                  <div style={{ textAlign: "left", width: "100%", maxWidth: 320, fontSize: 13 }}>
                     {(scanPhaseOrderRef.current.length ? scanPhaseOrderRef.current : ["read", "ai", "parse"]).map((id, i, order) => {
                       const labels = {
-                        read: "Reading file",
-                        ocr: "Extracting text",
-                        ai: "AI analysis",
-                        parse: "Parsing results",
-                      };
-                      const subs = {
-                        read: "Loading from device",
-                        ocr: "Running OCR engine",
-                        ai: "Sending to OpenAI Vision",
-                        parse: "Amount, category & items",
+                        read: "Reading file from your device",
+                        ocr: "Extracting text from file",
+                        ai: "Sending to OpenAI for analysis",
+                        parse: "Parsing total, category & lines",
                       };
                       const phase = order.includes(scanPhase) ? scanPhase : order[0];
                       const idx = order.indexOf(phase);
@@ -3886,35 +3860,18 @@ export default function App({ onReady }) {
                       return (
                         <div
                           key={id}
-                          className={`scan-step-row${active ? " active" : ""}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 0",
+                            borderBottom: i < order.length - 1 ? `1px solid ${T.bdr}` : "none",
+                            color: done || active ? T.txt : T.mut,
+                            fontWeight: active ? 700 : 500,
+                          }}
                         >
-                          {/* Status icon */}
-                          <div style={{
-                            width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                            background: done ? `${T.grn || "#30D158"}18` : active ? `${T.acc}18` : "rgba(255,255,255,0.05)",
-                            border: `1px solid ${done ? `${T.grn || "#30D158"}44` : active ? `${T.acc}44` : T.bdr}`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            transition: "all 0.25s",
-                          }}>
-                            {done ? (
-                              <span style={{ fontSize: 13, color: T.grn || "#30D158", fontWeight: 800 }}>✓</span>
-                            ) : active ? (
-                              <div className="scan-arc" style={{
-                                width: 14, height: 14, borderRadius: "50%",
-                                border: `2px solid ${T.bdr}`,
-                                borderTopColor: T.acc,
-                              }} />
-                            ) : (
-                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.mut, display: "block" }} />
-                            )}
-                          </div>
-                          {/* Label */}
-                          <div style={{ flex: 1, textAlign: "left" }}>
-                            <div style={{ fontSize: 13, fontWeight: active ? 700 : done ? 600 : 500, color: done || active ? T.txt : T.sub }}>
-                              {labels[id] || id}
-                            </div>
-                            <div style={{ fontSize: 11, color: T.mut, marginTop: 1 }}>{subs[id] || ""}</div>
-                          </div>
+                          <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
+                          {labels[id] || id}
                         </div>
                       );
                     })}
@@ -4929,193 +4886,232 @@ export default function App({ onReady }) {
         )}
         {tab === "analytics" && !(fbStatus === "loading" && txs.length === 0) && (
           <div className="tab-content">
-            {/* ── Large iOS title + period segment control ── */}
-            <div style={{ padding: `${px + 10}px ${px}px 0` }}>
-              <div className="ios-large-title" style={{ fontSize: comfortable ? 34 : 28, marginBottom: 14 }}>Analytics</div>
-
-              {/* Segment control — Apple Health period picker */}
-              <div style={{ display: "flex", background: "rgba(255,255,255,0.07)", borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+            <div style={{ padding: `${px + 8}px ${px}px ${px}px` }}>
+              <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 14 }}>Analytics</div>
+              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
                 {[
-                  ["today", "Day"],
-                  ["week",  "Week"],
+                  ["today", "Today"],
+                  ["week", "Week"],
                   ["month", "Month"],
-                  ["custom","Custom"],
+                  ["custom", "Custom"],
                 ].map(([f, l]) => (
-                  <button
-                    type="button"
-                    key={f}
-                    onClick={() => setDf(f)}
-                    style={{
-                      flex: 1,
-                      padding: "8px 4px",
-                      borderRadius: 10,
-                      border: "none",
-                      background: df === f ? T.acc : "transparent",
-                      color: df === f ? T.btnTxt : T.sub,
-                      fontSize: 13,
-                      fontWeight: df === f ? 700 : 500,
-                      cursor: "pointer",
-                      transition: "background .15s, color .15s",
-                      letterSpacing: "-0.2px",
-                    }}
-                  >{l}</button>
+                  <button type="button" key={f} onClick={() => setDf(f)} style={{ ...pill(df === f), flexShrink: 0 }}>
+                    {l}
+                  </button>
                 ))}
               </div>
-
               {df === "custom" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                  {[{ label: "From", value: cS, set: setCS }, { label: "To", value: cE, set: setCE }].map(({ label, value, set }) => (
-                    <div key={label}>
-                      <label style={{ fontSize: 11, color: T.sub, display: "block", marginBottom: 4 }}>{label}</label>
-                      <input type="date" value={value} onChange={(e) => set(e.target.value)}
-                        style={{ ...inp, minHeight: 44, fontSize: 15, WebkitAppearance: "none", appearance: "none" }} />
-                    </div>
-                  ))}
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 14,
+                    borderRadius: T.r,
+                    border: `1px solid ${T.bdr}`,
+                    background: T.card2,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.sub, marginBottom: 12 }}>Date range</div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                      alignItems: "stretch",
+                    }}
+                  >
+                    {[
+                      { label: "From", value: cS, set: setCS },
+                      { label: "To", value: cE, set: setCE },
+                    ].map(({ label, value, set }) => (
+                      <div key={label} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                        <label style={{ ...lbl, marginBottom: 0 }}>{label}</label>
+                        <input
+                          type="date"
+                          value={value}
+                          onChange={(e) => set(e.target.value)}
+                          style={{
+                            ...inp,
+                            width: "100%",
+                            minWidth: 0,
+                            minHeight: 48,
+                            height: 48,
+                            fontSize: 16,
+                            lineHeight: 1.25,
+                            display: "block",
+                            flexShrink: 0,
+                            WebkitAppearance: "none",
+                            appearance: "none",
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* ── Hero summary card with embedded area chart ── */}
-            <div className="g hero-card" style={{ margin: `0 ${px}px 14px`, borderRadius: T.rLg, overflow: "hidden" }}>
-              {/* Summary row */}
-              <div style={{ padding: "18px 18px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 12, color: T.sub, letterSpacing: "-0.1px", marginBottom: 2 }}>
-                    { df === "today" ? "Today" : df === "week" ? "This Week" : df === "month" ? "This Month" : "Custom Range" }
-                  </div>
-                  <div className="stat-display" style={{ fontSize: 40, lineHeight: 1 }}>{formatMoney(fTotal)}</div>
-                  <div style={{ fontSize: 12, color: T.sub, marginTop: 4 }}>{filtered.length} transactions</div>
-                </div>
-                {breakdown.length > 0 && (
-                  <div style={{ flexShrink: 0 }}>
-                    {/* Mini donut */}
-                    <svg width={64} height={64} viewBox="0 0 36 36" style={{ transform: "rotate(-90deg)" }}>
-                      <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="4" />
-                      {breakdown.slice(0, 5).reduce((acc, b, i) => {
-                        const pct = b.value / fTotal;
-                        const dash = pct * 87.96;
-                        const offset = -acc.offset;
-                        acc.els.push(
-                          <circle key={i} cx="18" cy="18" r="14" fill="none"
-                            stroke={b.c} strokeWidth="4" strokeLinecap="butt"
-                            strokeDasharray={`${dash} ${87.96 - dash}`}
-                            strokeDashoffset={offset} />
-                        );
-                        acc.offset += dash;
-                        return acc;
-                      }, { els: [], offset: 0 }).els}
-                    </svg>
-                  </div>
-                )}
-              </div>
+            <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+              <div style={{ fontSize: 12, color: T.sub, marginBottom: 4 }}>Total Spent</div>
+              <div style={{ fontSize: 34, fontWeight: 800 }}>{formatMoney(fTotal)}</div>
+              <div style={{ fontSize: 13, color: T.sub, marginTop: 3 }}>{filtered.length} transactions</div>
+            </div>
 
-              {/* Area chart — full bleed, no padding */}
-              {dailyData.length > 1 && (
-                <div style={{ marginTop: 2 }}>
-                  <ResponsiveContainer width="100%" height={110}>
-                    <AreaChart data={dailyData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+            {twoCol && breakdown.length > 0 ? (
+              <div
+                style={{
+                  margin: `0 ${px}px 14px`,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 14,
+                  alignItems: "stretch",
+                }}
+              >
+                <div style={{ ...card, margin: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Category Breakdown</div>
+                  <ResponsiveContainer width="100%" height={chart.pie}>
+                    <PieChart>
+                      <Pie
+                        data={breakdown}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={twoCol ? 40 : 52}
+                        outerRadius={twoCol ? 68 : 82}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {breakdown.map((e, i) => (
+                          <Cell key={i} fill={e.c} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                    {breakdown.slice(0, 7).map((b, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                            <CategoryIcon name={b.name} size={12} color={b.c} /> {b.name}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 11, color: T.sub }}>{Math.round((b.value / fTotal) * 100)}%</span>
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{formatMoney(b.value)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ ...card, margin: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Daily Spending (14 days)</div>
+                  <ResponsiveContainer width="100%" height={chart.area}>
+                    <AreaChart data={dailyData}>
                       <defs>
-                        <linearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%"   stopColor={T.acc} stopOpacity={0.35} />
-                          <stop offset="100%" stopColor={T.acc} stopOpacity={0} />
+                        <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={T.acc} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={T.acc} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <XAxis dataKey="label"
-                        tick={{ fontSize: 9, fill: T.sub, fontFamily: "Inter,sans-serif" }}
-                        tickLine={false} axisLine={false}
-                        interval={Math.max(1, Math.floor(dailyData.length / 6))}
-                        padding={{ left: 8, right: 8 }}
-                      />
-                      <YAxis hide domain={['auto', 'auto']} />
-                      <Tooltip
-                        formatter={(v) => [formatMoney(v), "Spent"]}
-                        contentStyle={{ background: "rgba(18,18,36,0.90)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, color: T.txt, fontSize: 12, fontFamily: "Inter,sans-serif" }}
-                        cursor={{ stroke: T.acc, strokeWidth: 1, strokeDasharray: "3 3" }}
-                      />
-                      <Area type="monotone" dataKey="amount"
-                        stroke={T.acc} strokeWidth={2.5} fill="url(#heroGrad)"
-                        dot={false} activeDot={{ r: 4, fill: T.acc, strokeWidth: 0 }}
-                      />
+                      <XAxis dataKey="label" tick={{ fontSize: 9, fill: T.sub }} tickLine={false} axisLine={false} interval={3} />
+                      <YAxis hide />
+                      <Tooltip formatter={(v) => [formatMoney(v), "Spent"]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="amount" stroke={T.acc} strokeWidth={2} fill="url(#ag)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-              )}
-            </div>
-
-            {/* ── Category breakdown — horizontal scroll cards (Apple Health style) ── */}
-            {breakdown.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: `0 ${px}px`, marginBottom: 10 }}>
-                  <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.3px" }}>By Category</div>
-                  <div style={{ fontSize: 13, color: T.sub }}>{breakdown.length} categories</div>
-                </div>
-                <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: `0 ${px}px`, paddingBottom: 4 }}>
-                  {breakdown.slice(0, 8).map((b, i) => (
-                    <div key={i} style={{
-                      flexShrink: 0,
-                      width: 110,
-                      background: "rgba(255,255,255,0.05)",
-                      border: `1px solid rgba(255,255,255,0.08)`,
-                      borderRadius: 16,
-                      padding: "12px 12px 10px",
-                    }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 10, background: b.c + "22", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
-                        <CategoryIcon name={b.name} size={16} color={b.c} />
-                      </div>
-                      <div style={{ fontSize: 11, color: T.sub, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</div>
-                      <div className="stat-display" style={{ fontSize: 15 }}>{formatMoney(b.value)}</div>
-                      <div style={{ marginTop: 6, height: 3, borderRadius: 99, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${Math.round((b.value / fTotal) * 100)}%`, background: b.c, borderRadius: 99, transition: "width .4s" }} />
-                      </div>
-                      <div style={{ fontSize: 10, color: T.sub, marginTop: 3 }}>{Math.round((b.value / fTotal) * 100)}%</div>
-                    </div>
-                  ))}
-                </div>
               </div>
+            ) : (
+              <>
+                {breakdown.length > 0 && (
+                  <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Category Breakdown</div>
+                    <ResponsiveContainer width="100%" height={chart.pie}>
+                      <PieChart>
+                        <Pie data={breakdown} cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={3} dataKey="value">
+                          {breakdown.map((e, i) => (
+                            <Cell key={i} fill={e.c} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+                      {breakdown.slice(0, 7).map((b, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
+                            <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+                              <CategoryIcon name={b.name} size={13} color={b.c} /> {b.name}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 12, color: T.sub }}>{Math.round((b.value / fTotal) * 100)}%</span>
+                            <span style={{ fontSize: 13, fontWeight: 700 }}>{formatMoney(b.value)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Daily Spending (14 days)</div>
+                  <ResponsiveContainer width="100%" height={chart.area}>
+                    <AreaChart data={dailyData}>
+                      <defs>
+                        <linearGradient id="ag2" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={T.acc} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={T.acc} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: T.sub }} tickLine={false} axisLine={false} interval={3} />
+                      <YAxis hide />
+                      <Tooltip formatter={(v) => [formatMoney(v), "Spent"]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                      <Area type="monotone" dataKey="amount" stroke={T.acc} strokeWidth={2} fill="url(#ag2)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
 
-            {/* ── Top categories horizontal bar chart ── */}
             {breakdown.length > 0 && (
-              <div className="g" style={{ margin: `0 ${px}px 14px`, borderRadius: T.rLg, padding: "16px 16px 10px" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, letterSpacing: "-0.2px" }}>Top Spending</div>
-                <ResponsiveContainer width="100%" height={Math.min(breakdown.length, 6) * 38 + 8}>
-                  <BarChart data={breakdown.slice(0, 6)} layout="vertical" margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
+              <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Top Spending Categories</div>
+                <ResponsiveContainer width="100%" height={chart.bar}>
+                  <BarChart data={breakdown.slice(0, 6)} layout="vertical" margin={{ left: 4, right: 10 }}>
                     <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name"
-                      tick={{ fontSize: 12, fill: T.sub, fontFamily: "Inter,sans-serif" }}
-                      tickLine={false} axisLine={false} width={88}
-                    />
-                    <Tooltip
-                      formatter={(v) => [formatMoney(v)]}
-                      contentStyle={{ background: "rgba(18,18,36,0.90)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, color: T.txt, fontSize: 12, fontFamily: "Inter,sans-serif" }}
-                    />
-                    <Bar dataKey="value" radius={[0, 8, 8, 0]} maxBarSize={22}>
-                      {breakdown.slice(0, 6).map((e, i) => <Cell key={i} fill={e.c} />)}
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: T.sub }} tickLine={false} axisLine={false} width={95} />
+                    <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }} />
+                    <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                      {breakdown.slice(0, 6).map((e, i) => (
+                        <Cell key={i} fill={e.c} />
+                      ))}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             )}
 
-            {/* ── Payment methods ── */}
             {paymentBreakdown.length > 0 && (
-              <div className="g" style={{ margin: `0 ${px}px 14px`, borderRadius: T.rLg, padding: "16px" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, letterSpacing: "-0.2px" }}>Payment Methods</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  <ResponsiveContainer width={100} height={100}>
+              <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Payment Methods</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <ResponsiveContainer width={120} height={120}>
                     <PieChart>
-                      <Pie data={paymentBreakdown} cx="50%" cy="50%" innerRadius={28} outerRadius={46}
-                        paddingAngle={3} dataKey="value" stroke="none">
-                        {paymentBreakdown.map((e, i) => <Cell key={i} fill={e.c} />)}
+                      <Pie data={paymentBreakdown} cx="50%" cy="50%" innerRadius={32} outerRadius={52} paddingAngle={3} dataKey="value" stroke="none">
+                        {paymentBreakdown.map((e, i) => (
+                          <Cell key={i} fill={e.c} />
+                        ))}
                       </Pie>
                     </PieChart>
                   </ResponsiveContainer>
                   <div style={{ flex: 1 }}>
-                    {paymentBreakdown.map((b) => (
-                      <div key={b.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 99, background: b.c, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.sub }}>{b.name}</span>
-                        <span className="stat-display" style={{ fontSize: 13, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                    {paymentBreakdown.map((b, i) => (
+                      <div key={b.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: b.c, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
                       </div>
                     ))}
                   </div>
@@ -5123,60 +5119,200 @@ export default function App({ onReady }) {
               </div>
             )}
 
-            {/* ═══ SPLITS ANALYTICS ═══ */}
+            {/* ═══════════════════ SPLITS ANALYTICS ═══════════════════ */}
             {splitAnalytics.splitCount > 0 && (
               <>
-                <div style={{ margin: `4px ${px}px 10px`, display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ margin: `20px ${px}px 10px`, display: "flex", alignItems: "center", gap: 8 }}>
                   <Users size={16} color={T.acc} />
-                  <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.3px" }}>Splits</div>
-                  <div style={{ fontSize: 12, color: T.sub }}>
-                    {splitAnalytics.splitCount} {splitAnalytics.splitCount === 1 ? "bill" : "bills"} · {formatMoney(splitAnalytics.splitTotalValue)}
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>Splits</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>
+                    {splitAnalytics.splitCount} {splitAnalytics.splitCount === 1 ? "bill" : "bills"} · {formatMoney(splitAnalytics.splitTotalValue)} total
                   </div>
                 </div>
 
-                <div style={{ margin: `0 ${px}px 14px`, display: "grid", gridTemplateColumns: twoCol ? "repeat(4, 1fr)" : "1fr 1fr", gap: 10 }}>
-                  {[
-                    { label: "Owed to you", val: splitAnalytics.outstandingToYou, col: T.grn || "#30D158" },
-                    { label: "You owe",      val: splitAnalytics.outstandingFromYou, col: T.dng },
-                    { label: "Net position", val: splitAnalytics.netPosition, col: splitAnalytics.netPosition >= 0 ? (T.grn||"#30D158") : T.warn, prefix: splitAnalytics.netPosition >= 0 ? "+" : "" },
-                    { label: "Active peers", val: splitAnalytics.peers.length, col: T.acc, count: true },
-                  ].map((s) => (
-                    <div key={s.label} className="g" style={{ borderRadius: 16, padding: "12px 14px" }}>
-                      <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>{s.label}</div>
-                      <div className="stat-display" style={{ fontSize: 20, color: s.col }}>
-                        {s.prefix || ""}{s.count ? s.val : formatMoney(s.val)}
-                      </div>
+                {/* Stat row: who owes whom + net position */}
+                <div style={{
+                  margin: `0 ${px}px 14px`,
+                  display: "grid",
+                  gridTemplateColumns: twoCol ? "repeat(4, 1fr)" : "1fr 1fr",
+                  gap: 10,
+                }}>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.grn || "#22c55e"}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Owed to you</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.grn || "#22c55e" }}>
+                      {formatMoney(splitAnalytics.outstandingToYou)}
                     </div>
-                  ))}
+                    {splitAnalytics.settledToYou > 0 ? (
+                      <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                        Recovered {formatMoney(splitAnalytics.settledToYou)}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.dng}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>You owe</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.dng }}>
+                      {formatMoney(splitAnalytics.outstandingFromYou)}
+                    </div>
+                    {splitAnalytics.settledFromYou > 0 ? (
+                      <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                        Paid back {formatMoney(splitAnalytics.settledFromYou)}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${splitAnalytics.netPosition >= 0 ? T.grn || "#22c55e" : T.warn}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Net position</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: splitAnalytics.netPosition >= 0 ? T.grn || "#22c55e" : T.warn }}>
+                      {splitAnalytics.netPosition >= 0 ? "+" : ""}{formatMoney(splitAnalytics.netPosition)}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                      {splitAnalytics.netPosition >= 0 ? "In your favour" : "You're behind"}
+                    </div>
+                  </div>
+                  <div style={{ ...card, margin: 0, borderLeft: `3px solid ${T.acc}` }}>
+                    <div style={{ fontSize: 11, color: T.sub, marginBottom: 4 }}>Active peers</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.acc }}>
+                      {splitAnalytics.peers.length}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.sub, marginTop: 2 }}>
+                      {splitAnalytics.peers.filter((p) => Math.abs(p.net) > 0.005).length} with balance
+                    </div>
+                  </div>
                 </div>
 
+                {/* Two-up: split by friend + split by category */}
+                {(splitAnalytics.byFriend.length > 0 || splitAnalytics.byCategory.length > 0) && (
+                  <div style={{
+                    margin: `0 ${px}px 14px`,
+                    display: "grid",
+                    gridTemplateColumns: twoCol ? "1fr 1fr" : "1fr",
+                    gap: 14,
+                  }}>
+                    {splitAnalytics.byFriend.length > 0 && (
+                      <div style={{ ...card, margin: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Split by Friend</div>
+                        <ResponsiveContainer width="100%" height={chart.pie}>
+                          <PieChart>
+                            <Pie
+                              data={splitAnalytics.byFriend}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={3}
+                              dataKey="value"
+                              stroke="none"
+                            >
+                              {splitAnalytics.byFriend.map((e, i) => (
+                                <Cell key={i} fill={e.c} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v) => [formatMoney(v)]}
+                              contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                          {splitAnalytics.byFriend.slice(0, 8).map((b, i) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                                <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+                              </div>
+                              <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {splitAnalytics.byCategory.length > 0 && (
+                      <div style={{ ...card, margin: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Split by Category</div>
+                        <ResponsiveContainer width="100%" height={chart.pie}>
+                          <PieChart>
+                            <Pie
+                              data={splitAnalytics.byCategory}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={3}
+                              dataKey="value"
+                              stroke="none"
+                            >
+                              {splitAnalytics.byCategory.map((e, i) => (
+                                <Cell key={i} fill={e.c} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v) => [formatMoney(v)]}
+                              contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 10, color: T.txt, fontSize: 12 }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxHeight: 140, overflowY: "auto" }}>
+                          {splitAnalytics.byCategory.slice(0, 8).map((b, i) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.c, flexShrink: 0 }} />
+                                <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  <CategoryIcon name={b.name} size={12} color={b.c} /> {b.name}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{formatMoney(b.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Per-peer balances */}
                 {splitAnalytics.peers.length > 0 && (
-                  <div className="g" style={{ margin: `0 ${px}px 14px`, borderRadius: T.rLg, padding: "16px" }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, letterSpacing: "-0.2px" }}>Balances by Peer</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                      {splitAnalytics.peers.slice(0, 8).map((p, i) => {
+                  <div style={{ margin: `0 ${px}px 14px`, ...card }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Balances by Peer</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {splitAnalytics.peers.slice(0, 10).map((p) => {
                         const net = p.net;
-                        const col = Math.abs(net) < 0.005 ? T.sub : net > 0 ? (T.grn||"#30D158") : T.dng;
-                        const lbl = Math.abs(net) < 0.005 ? "settled" : net > 0 ? "owes you" : "you owe";
+                        const color = Math.abs(net) < 0.005 ? T.sub : net > 0 ? (T.grn || "#22c55e") : T.dng;
+                        const label = Math.abs(net) < 0.005 ? "settled" : net > 0 ? "owes you" : "you owe";
                         return (
-                          <div key={p.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: i < splitAnalytics.peers.slice(0,8).length - 1 ? `1px solid ${T.bdr}` : "none" }}>
-                            <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <div key={p.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.bdr}` }}>
+                            <div style={{ width: 32, height: 32, borderRadius: 10, background: T.card2, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                               <Users size={15} color={T.sub} />
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                              <div style={{ fontSize: 11, color: T.sub, marginTop: 1 }}>{p.splitCount} {p.splitCount === 1 ? "bill" : "bills"}</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {p.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>
+                                {p.splitCount} {p.splitCount === 1 ? "bill" : "bills"}
+                                {p.settledByThem > 0 ? <> · received {formatMoney(p.settledByThem)}</> : null}
+                                {p.settledByYou > 0 ? <> · paid {formatMoney(p.settledByYou)}</> : null}
+                              </div>
                             </div>
-                            <div style={{ textAlign: "right" }}>
-                              <div className="stat-display" style={{ fontSize: 15, color: col }}>{net > 0 ? "+" : net < 0 ? "-" : ""}{formatMoney(Math.abs(net))}</div>
-                              <div style={{ fontSize: 10, color: T.sub, marginTop: 1 }}>{lbl}</div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 800, color }}>
+                                {net > 0 ? "+" : net < 0 ? "-" : ""}{formatMoney(Math.abs(net))}
+                              </div>
+                              <div style={{ fontSize: 10, color: T.sub, marginTop: 1 }}>{label}</div>
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                    <button type="button" onClick={() => setTab("reports")}
-                      style={{ marginTop: 12, width: "100%", padding: 10, borderRadius: 10, border: `1px solid ${T.purp}40`, background: T.pdim, color: T.purp, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setTab("reports")}
+                      style={{
+                        marginTop: 10, width: "100%", padding: 10, borderRadius: 10,
+                        border: `1px solid ${T.purp}`, background: T.pdim, color: T.purp,
+                        fontSize: 12, fontWeight: 700, cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}
+                    >
                       <Sparkles size={13} /> Use in AI Report
                     </button>
                   </div>
@@ -5186,7 +5322,6 @@ export default function App({ onReady }) {
 
           </div>
         )}
-
 
         {/* ═══════════════════ REPORTS TAB ═══════════════════ */}
         {tab === "reports" && (
@@ -5300,7 +5435,7 @@ export default function App({ onReady }) {
                   ))
                 ) : (
                   <div style={{ ...card, textAlign: "center", padding: 32 }}>
-                    <div style={{ width: 52, height: 52, borderRadius: 16, background: T.pdim, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <div style={{ width: 52, height: 52, borderRadius: 12, background: T.pdim, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
                       <BrainCircuit size={24} color={T.purp} />
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>AI-Powered Expense Advisor</div>

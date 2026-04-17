@@ -243,7 +243,7 @@ export function TxDetail({
   useEffect(() => () => { if (splitTimerRef.current) clearTimeout(splitTimerRef.current); }, []);
   function handleDelete() { onDelete(tx.id); onClose(); }
 
-  // sectionCard is now a CSS class `.tx-section-card` (theme-aware via glass.css)
+  const sectionCard = { background: "rgba(255,255,255,0.05)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", borderRadius: 12, border: `1px solid ${T.bdr}`, padding: 14, marginBottom: 10 };
   const detailRow = (label, value, extra) => value ? (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: `1px solid ${T.bdr}` }}>
       <span style={{ fontSize: 13, color: T.sub, flexShrink: 0 }}>{label}</span>
@@ -316,60 +316,41 @@ export function TxDetail({
         ) : (
           <>
             {/* Hero: Icon + Amount + Category */}
-            <div style={{ padding: "4px 16px 14px" }}>
-              <div className="tx-detail-hero" style={{ padding: "20px 18px 18px", textAlign: "center" }}>
-                {/* Category colour glow blob */}
-                <div style={{
-                  position: "absolute", inset: 0,
-                  background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${cat.c}18 0%, transparent 70%)`,
-                  pointerEvents: "none", borderRadius: "inherit",
-                }} />
-                {/* Icon */}
-                <div style={{
-                  width: 64, height: 64, borderRadius: 18,
-                  background: cat.bg,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  margin: "0 auto 12px",
-                  border: `1.5px solid ${cat.c}44`,
-                  boxShadow: `0 8px 28px ${cat.c}28, inset 0 1px 0 rgba(255,255,255,0.12)`,
-                  position: "relative", zIndex: 1,
-                }}>
-                  <CategoryIcon name={tx.category} size={28} color={cat.c} />
+            <div style={{ padding: "4px 16px 16px", textAlign: "center" }}>
+              <div style={{ width: 56, height: 56, borderRadius: 12, background: cat.bg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 8px", border: `2px solid ${cat.c}33` }}>
+                <CategoryIcon name={tx.category} size={26} color={cat.c} />
+              </div>
+              {/* Primary number is the *remaining* amount for whoever's looking — slaves see
+                  what they still owe, master sees unrecovered spend. Full bill stays visible
+                  as a muted sub-line so the original total isn't lost. */}
+              <div className="stat-display" style={{ fontSize: 36, color: isFullySettled ? (T.grn || "#30D158") : T.txt }}>
+                -{formatMoney(remainingAmt)}
+              </div>
+              {(isMirror ? (settledByMe > 0) : (masterSettledSum > 0)) ? (
+                <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>
+                  Bill {formatMoney(txAmt)}
+                  {isMirror ? (
+                    <> · your share {formatMoney(myShare)} · settled {formatMoney(settledByMe)}</>
+                  ) : (
+                    <> · recovered {formatMoney(masterSettledSum)}</>
+                  )}
                 </div>
-                {/* Amount */}
-                <div className="stat-display" style={{ fontSize: 40, color: isFullySettled ? (T.grn || "#30D158") : T.txt, position: "relative", zIndex: 1 }}>
-                  -{formatMoney(remainingAmt)}
+              ) : null}
+              {isFullySettled ? (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e", background: `${T.grn || "#22c55e"}10`, border: `1px solid ${T.grn || "#22c55e"}44`, borderRadius: 8, padding: "2px 10px", letterSpacing: 0.4 }}>
+                  <BadgeCheck size={12} /> FULLY SETTLED
                 </div>
-                {/* Settlement sub-line */}
-                {(isMirror ? (settledByMe > 0) : (masterSettledSum > 0)) ? (
-                  <div style={{ fontSize: 12, color: T.sub, marginTop: 3, position: "relative", zIndex: 1 }}>
-                    Bill {formatMoney(txAmt)}
-                    {isMirror ? (
-                      <> · your share {formatMoney(myShare)} · settled {formatMoney(settledByMe)}</>
-                    ) : (
-                      <> · recovered {formatMoney(masterSettledSum)}</>
-                    )}
-                  </div>
-                ) : null}
-                {/* Fully settled badge */}
-                {isFullySettled ? (
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 10, fontSize: 11, fontWeight: 700, color: T.grn || "#22c55e", background: `${T.grn || "#22c55e"}14`, border: `1px solid ${T.grn || "#22c55e"}44`, borderRadius: 99, padding: "4px 12px", letterSpacing: 0.4, position: "relative", zIndex: 1 }}>
-                    <BadgeCheck size={12} /> FULLY SETTLED
-                  </div>
-                ) : null}
-                {/* Notes */}
-                {tx.notes && <div style={{ fontSize: 13, color: T.sub, marginTop: 8, lineHeight: 1.4, position: "relative", zIndex: 1 }}>{tx.notes}</div>}
-                {/* Category pill */}
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 10, fontSize: 12, color: cat.c, background: cat.bg, borderRadius: 99, padding: "4px 12px", border: `1px solid ${cat.c}33`, position: "relative", zIndex: 1 }}>
-                  <CategoryIcon name={tx.category} size={12} color={cat.c} />
-                  {tx.category}
-                </div>
+              ) : null}
+              {tx.notes && <div style={{ fontSize: 14, color: T.sub, marginTop: 4, lineHeight: 1.3 }}>{tx.notes}</div>}
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 12, color: cat.c, background: cat.bg, borderRadius: 8, padding: "3px 10px", border: `1px solid ${cat.c}33` }}>
+                <CategoryIcon name={tx.category} size={12} color={cat.c} />
+                {tx.category}
               </div>
             </div>
 
             {/* Details Card */}
             <div style={{ padding: "0 16px" }}>
-              <div className="tx-section-card">
+              <div style={sectionCard}>
                 {detailRow("Date", fDate(tx.date, dateLocale) + "  ·  " + tx.date)}
                 {detailRow("Payment", tx.payment)}
                 {hasTags && (
@@ -394,7 +375,7 @@ export function TxDetail({
               const ownerLabel = "Owner"; // Future: name lookup by syncedFromUid
               return (
                 <div style={{ padding: "0 16px" }}>
-                  <div className="tx-section-card-accent" style={{ background: `${T.acc}08`, border: `1px solid ${T.acc}33` }}>
+                  <div style={{ ...sectionCard, background: `${T.acc}08`, borderColor: `${T.acc}33` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <div style={{ width: 28, height: 28, borderRadius: 8, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -777,7 +758,7 @@ export function TxDetail({
             {/* Split Editor (only when editing or no saved split + user initiated) */}
             {canEditSplit && (splitEditing || (!hasSavedSplit && !splitSaved)) && (
               <div style={{ padding: "0 16px" }}>
-                <div className="tx-section-card-accent" style={{ background: splitEditing ? `${T.acc}08` : "rgba(255,255,255,0.04)", border: `1px solid ${splitEditing ? `${T.acc}33` : T.bdr}` }}>
+                <div style={{ ...sectionCard, background: splitEditing ? `${T.acc}08` : T.card, borderColor: splitEditing ? `${T.acc}33` : T.bdr }}>
                   {!splitEditing && !hasSavedSplit ? (
                     <button type="button" onClick={openSplitEditor}
                       style={{
@@ -879,7 +860,7 @@ export function TxDetail({
             {/* Receipt Image */}
             {tx.receiptUrl && (
               <div style={{ padding: "0 16px" }}>
-                <div className="tx-section-card">
+                <div style={sectionCard}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
                     <ImageIcon size={13} /> Receipt
                   </div>
@@ -893,7 +874,7 @@ export function TxDetail({
             {/* Line Items */}
             {hasLineItems && (
               <div style={{ padding: "0 16px" }}>
-                <div className="tx-section-card">
+                <div style={sectionCard}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: 0.6 }}>
                     <ShoppingBag size={13} /> Items ({tx.lineItems.length})
                   </div>
@@ -974,7 +955,7 @@ export function TxDetail({
                 ) : null}
 
                 {settleOpen ? (
-                  <div className="tx-section-card" style={{ marginBottom: 10 }}>
+                  <div style={{ background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>Settle Up</div>
                       <button type="button" onClick={() => setSettleOpen(false)}

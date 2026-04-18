@@ -133,7 +133,7 @@
   bottom:     0 !important;
   width:      100% !important;
   margin:     0 !important;
-  padding:    6px 10px calc(env(safe-area-inset-bottom, 0px) + 8px) !important;
+  padding:    6px 10px max(6px, env(safe-area-inset-bottom, 0px)) !important;
 
   background:    var(--tabbar-bg) !important;
   backdrop-filter:         blur(24px) saturate(170%) !important;

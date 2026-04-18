@@ -3409,13 +3409,13 @@ export default function App({ onReady }) {
                       >
                         {monthBudgetRing.over ? (
                           <>
-                            <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1 }}>Over</div>
-                            <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>budget</div>
+                            <div style={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Over</div>
+                            <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.3px", marginTop: 2 }}>{formatMoney(monthBudgetRing.spent - monthBudgetRing.cap)}</div>
                           </>
                         ) : (
                           <>
-                            <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.4px" }}>
-                              {Math.round(monthBudgetRing.remainingFrac * 100)}%
+                            <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.3px" }}>
+                              {formatMoney(monthBudgetRing.cap - monthBudgetRing.spent)}
                             </div>
                             <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>left</div>
                           </>
@@ -3581,8 +3581,6 @@ export default function App({ onReady }) {
             {(() => {
               const dayOfMonth = new Date().getDate();
               const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
-              const topCat = breakdown[0];
-              const budgetLeft = monthBudgetRing ? monthBudgetRing.cap - monthBudgetRing.spent : null;
               const metrics = [
                 {
                   label: "Today",
@@ -3591,39 +3589,11 @@ export default function App({ onReady }) {
                   accent: T.acc,
                 },
                 {
-                  label: "This Week",
-                  val: formatMoney(weekTotal),
-                  sub: weekTxs.length === 1 ? "1 transaction" : `${weekTxs.length} transactions`,
-                  accent: T.blue,
-                },
-                {
                   label: "Avg / Day",
                   val: formatMoney(avgDay),
                   sub: `over ${dayOfMonth} day${dayOfMonth !== 1 ? "s" : ""}`,
                   accent: T.grn || "#22c55e",
                 },
-                {
-                  label: "Transactions",
-                  val: monthTxs.length,
-                  sub: "this month",
-                  accent: "#A78BFA",
-                },
-                ...(topCat
-                  ? [{
-                      label: "Top Category",
-                      val: topCat.name,
-                      sub: formatMoney(topCat.value),
-                      accent: T.warn,
-                    }]
-                  : []),
-                ...(budgetLeft !== null
-                  ? [{
-                      label: budgetLeft >= 0 ? "Budget Left" : "Over Budget",
-                      val: formatMoney(Math.abs(budgetLeft)),
-                      sub: budgetLeft >= 0 ? "remaining this month" : "above your cap",
-                      accent: budgetLeft >= 0 ? (T.grn || "#22c55e") : T.dng,
-                    }]
-                  : []),
               ];
               return (
                 <div

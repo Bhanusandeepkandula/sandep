@@ -6800,8 +6800,9 @@ export default function App({ onReady }) {
           </div>
         </div>
       ) : null}
+    </div>
 
-      {/* ── iOS 26 Floating Glass Tab Bar ── */}
+    {/* ── iOS 26 Floating Glass Tab Bar ── */}
       <div
         className="glass-tab-bar"
         style={{
@@ -6887,7 +6888,6 @@ export default function App({ onReady }) {
           );
         })}
       </div>
-    </div>
 
     {/* Transaction detail overlay */}
     {selectedTx && (

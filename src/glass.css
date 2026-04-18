@@ -133,7 +133,7 @@
   bottom:     0 !important;
   width:      100% !important;
   margin:     0 !important;
-  padding:    6px 10px max(6px, env(safe-area-inset-bottom, 0px)) !important;
+  padding:    6px 10px calc(env(safe-area-inset-bottom, 0px) + 8px) !important;
 
   background:    var(--tabbar-bg) !important;
   backdrop-filter:         blur(24px) saturate(170%) !important;
@@ -141,7 +141,15 @@
   border:        none !important;
   border-top:    1px solid var(--ge) !important;
   border-radius: 0 !important;
-  box-shadow:    none !important;
+  /* Extend background below to cover safe-area gap in standalone PWA */
+  box-shadow:    0 60px 0 60px var(--tabbar-bg) !important;
+}
+
+/* Standalone PWA: guarantee minimum safe-area coverage even if env() returns 0 */
+@media (display-mode: standalone) {
+  .glass-tab-bar {
+    padding-bottom: max(34px, env(safe-area-inset-bottom, 34px)) !important;
+  }
 }
 
 /* Active tab item — dot under icon only, no fill */

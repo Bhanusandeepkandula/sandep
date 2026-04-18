@@ -133,7 +133,8 @@
   bottom:     0 !important;
   width:      100% !important;
   margin:     0 !important;
-  padding:    6px 10px calc(env(safe-area-inset-bottom, 0px) + 8px) !important;
+  /* In Safari browser mode env() returns 0 — no extra padding needed */
+  padding:    6px 10px env(safe-area-inset-bottom, 0px) !important;
 
   background:    var(--tabbar-bg) !important;
   backdrop-filter:         blur(24px) saturate(170%) !important;
@@ -141,14 +142,15 @@
   border:        none !important;
   border-top:    1px solid var(--ge) !important;
   border-radius: 0 !important;
-  /* Extend background below to cover safe-area gap in standalone PWA */
-  box-shadow:    0 60px 0 60px var(--tabbar-bg) !important;
+  box-shadow:    none !important;
 }
 
-/* Standalone PWA: guarantee minimum safe-area coverage even if env() returns 0 */
+/* Standalone PWA: safe-area zone must be covered (no browser chrome to handle it) */
 @media (display-mode: standalone) {
   .glass-tab-bar {
     padding-bottom: max(34px, env(safe-area-inset-bottom, 34px)) !important;
+    /* Extend background into physical safe-area zone in case env() returns 0 */
+    box-shadow: 0 60px 0 60px var(--tabbar-bg) !important;
   }
 }
 

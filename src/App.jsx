@@ -3451,27 +3451,6 @@ export default function App({ onReady }) {
                     </div>
                   )}
 
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {[
-                      { label: "Today", val: todayTotal },
-                      { label: "This Week", val: weekTotal },
-                    ].map((s) => (
-                      <div
-                        key={s.label}
-                        style={{
-                          flex: 1,
-                          background: T.card2,
-                          border: `1px solid ${T.bdr}`,
-                          borderRadius: T.r,
-                          padding: "10px 14px",
-                        }}
-                      >
-                        <div style={{ fontSize: 11, color: T.sub, marginBottom: 3, letterSpacing: "-0.1px" }}>{s.label}</div>
-                        <div className="stat-display" style={{ fontSize: 18, color: T.txt }}>{formatMoney(s.val)}</div>
-                      </div>
-                    ))}
-                  </div>
-
                   {!monthBudgetRing && (
                     <div style={{ fontSize: 11, color: T.mut, marginTop: 10, lineHeight: 1.4 }}>
                       Only spending dated in {calendarMonthLabel}. Set a monthly cap in Budgets to track % used.
@@ -3599,58 +3578,83 @@ export default function App({ onReady }) {
               </div>
             )}
 
-            <div
-              style={{
-                margin: `0 ${px}px 14px`,
-                display: "grid",
-                gridTemplateColumns: comfortable ? "repeat(2, minmax(0, 1fr))" : "1fr 1fr",
-                gap: comfortable ? 14 : 10,
-              }}
-            >
-              {[
+            {(() => {
+              const dayOfMonth = new Date().getDate();
+              const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
+              const topCat = breakdown[0];
+              const budgetLeft = monthBudgetRing ? monthBudgetRing.cap - monthBudgetRing.spent : null;
+              const metrics = [
                 {
-                  Icon: Camera,
-                  title: "Scan Bill",
-                  sub: "AI reads receipt",
-                  color: T.acc,
-                  cdim: T.adim,
-                  action: () => {
-                    setAddMode("image");
-                    setTab("add");
-                    setStep("mode");
-                  },
+                  label: "Today",
+                  val: formatMoney(todayTotal),
+                  sub: todayTxs.length === 1 ? "1 transaction" : `${todayTxs.length} transactions`,
+                  accent: T.acc,
                 },
                 {
-                  Icon: BarChart2,
-                  title: "Analytics",
-                  sub: "Charts & insights",
-                  color: T.blue,
-                  cdim: T.bdim,
-                  action: () => setTab("analytics"),
+                  label: "This Week",
+                  val: formatMoney(weekTotal),
+                  sub: weekTxs.length === 1 ? "1 transaction" : `${weekTxs.length} transactions`,
+                  accent: T.blue,
                 },
-              ].map((a) => (
-                <div key={a.title} onClick={a.action} style={{ ...card, cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-                  <div
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 10,
-                      background: a.cdim,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <a.Icon size={18} color={a.color} strokeWidth={1.8} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{a.title}</div>
-                    <div style={{ fontSize: 11, color: T.sub }}>{a.sub}</div>
-                  </div>
+                {
+                  label: "Avg / Day",
+                  val: formatMoney(avgDay),
+                  sub: `over ${dayOfMonth} day${dayOfMonth !== 1 ? "s" : ""}`,
+                  accent: T.grn || "#22c55e",
+                },
+                {
+                  label: "Transactions",
+                  val: monthTxs.length,
+                  sub: "this month",
+                  accent: "#A78BFA",
+                },
+                ...(topCat
+                  ? [{
+                      label: "Top Category",
+                      val: topCat.name,
+                      sub: formatMoney(topCat.value),
+                      accent: T.warn,
+                    }]
+                  : []),
+                ...(budgetLeft !== null
+                  ? [{
+                      label: budgetLeft >= 0 ? "Budget Left" : "Over Budget",
+                      val: formatMoney(Math.abs(budgetLeft)),
+                      sub: budgetLeft >= 0 ? "remaining this month" : "above your cap",
+                      accent: budgetLeft >= 0 ? (T.grn || "#22c55e") : T.dng,
+                    }]
+                  : []),
+              ];
+              return (
+                <div
+                  style={{
+                    margin: `0 ${px}px 14px`,
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                  }}
+                >
+                  {metrics.map((m) => (
+                    <div
+                      key={m.label}
+                      style={{
+                        ...card,
+                        margin: 0,
+                        padding: "12px 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        borderLeft: `3px solid ${m.accent}`,
+                      }}
+                    >
+                      <div style={{ fontSize: 10, color: T.sub, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>{m.label}</div>
+                      <div className="stat-display" style={{ fontSize: 17, fontWeight: 700, color: T.txt, lineHeight: 1.1 }}>{m.val}</div>
+                      <div style={{ fontSize: 11, color: T.sub }}>{m.sub}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
 
             {Object.entries(budgets)
               .filter(([c, l]) => c !== MONTH_TOTAL_BUDGET_KEY && (catSpent[c] || 0) >= l * 0.8)

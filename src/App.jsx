@@ -7031,6 +7031,7 @@ export default function App({ onReady }) {
                 color: active ? T.acc : T.sub,
                 cursor: "pointer",
                 padding: "8px 2px",
+                justifyContent: "center",
                 transition: "color .18s cubic-bezier(0.22,1,0.36,1)",
                 minWidth: 0,
               }}
@@ -7049,6 +7050,8 @@ export default function App({ onReady }) {
                 fontWeight: active ? 700 : 500,
                 letterSpacing: "-0.2px",
                 marginTop: 1,
+                textAlign: "center",
+                width: "100%",
               }}>
                 {item.label}
               </span>

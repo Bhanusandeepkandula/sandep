@@ -7024,6 +7024,7 @@ export default function App({ onReady }) {
           justifyContent: "space-around",
           boxSizing: "border-box",
           zIndex: 99,
+          height: "70px",
         }}
       >
         {[
@@ -7069,11 +7070,11 @@ export default function App({ onReady }) {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 4,
+                gap: 2,
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                padding: "6px 4px",
+                padding: "6px 4px 15px 4px",
                 minWidth: 0,
               }}
             >

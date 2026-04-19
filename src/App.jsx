@@ -6971,7 +6971,7 @@ export default function App({ onReady }) {
       ) : null}
     </div>
 
-    {/* ── iOS 26 Floating Glass Tab Bar ── */}
+    {/* ── Redesigned Glass Tab Bar ── */}
       <div
         className="glass-tab-bar"
         style={{
@@ -6984,31 +6984,32 @@ export default function App({ onReady }) {
         }}
       >
         {[
-          { id: "home",      icon: <Home size={22} />,       label: "Home"      },
-          { id: "analytics", icon: <BarChart2 size={22} />,   label: "Analytics" },
-          { id: "ADD",       icon: null,                       label: ""          },
-          { id: "reports",   icon: <BrainCircuit size={22} />, label: "Reports"  },
-          { id: "budgets",   icon: <Wallet size={22} />,       label: "Budgets"  },
+          { id: "home",      Icon: Home,        label: "Home"     },
+          { id: "analytics", Icon: BarChart2,   label: "Stats"    },
+          { id: "ADD",       Icon: null,         label: ""         },
+          { id: "reports",   Icon: BrainCircuit, label: "Reports"  },
+          { id: "budgets",   Icon: Wallet,       label: "Budgets"  },
         ].map((item) => {
           if (item.id === "ADD")
             return (
               <button
                 type="button"
                 key="add"
-                className="ios-fab"
                 onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 48,
-                  height: 48,
+                  width: 54,
+                  height: 54,
                   borderRadius: "50%",
                   background: T.acc,
-                  border: "none",
+                  border: `4px solid var(--tabbar-bg, ${T.card})`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  transform: "translateY(-14px)",
+                  transform: "translateY(-18px)",
                   flexShrink: 0,
+                  boxShadow: `0 4px 20px ${T.acc}70, 0 0 0 1px ${T.acc}30`,
+                  transition: "transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.18s",
                 }}
               >
                 <Plus size={24} color={T.btnTxt} strokeWidth={2.8} />
@@ -7020,42 +7021,52 @@ export default function App({ onReady }) {
               type="button"
               key={item.id}
               onClick={() => setTab(item.id)}
-              className={active ? "tab-item-active" : ""}
               style={{
                 flex: 1,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 3,
+                justifyContent: "center",
+                gap: 0,
                 background: "none",
                 border: "none",
-                color: active ? T.acc : T.sub,
                 cursor: "pointer",
-                padding: "8px 2px",
-                justifyContent: "center",
-                transition: "color .18s cubic-bezier(0.22,1,0.36,1)",
+                padding: "4px 2px 6px",
                 minWidth: 0,
               }}
             >
-              <span style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36,
-                height: 32,
-              }}>
-                {item.icon}
-              </span>
-              <span style={{
-                fontSize: 10,
-                fontWeight: active ? 700 : 500,
-                letterSpacing: "-0.2px",
-                marginTop: 1,
-                textAlign: "center",
-                width: "100%",
-              }}>
-                {item.label}
-              </span>
+              {/* Pill container */}
+              <div
+                className="nav-pill"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "7px 12px",
+                  borderRadius: 16,
+                  background: active ? T.adim : "transparent",
+                  border: `1px solid ${active ? T.acc + "35" : "transparent"}`,
+                  minWidth: 44,
+                }}
+              >
+                <item.Icon
+                  size={22}
+                  color={active ? T.acc : T.sub}
+                  strokeWidth={active ? 2.2 : 1.7}
+                />
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: active ? 700 : 500,
+                  color: active ? T.acc : T.sub,
+                  letterSpacing: active ? "-0.2px" : "0px",
+                  lineHeight: 1,
+                  opacity: active ? 1 : 0.75,
+                  textAlign: "center",
+                }}>
+                  {item.label}
+                </span>
+              </div>
             </button>
           );
         })}

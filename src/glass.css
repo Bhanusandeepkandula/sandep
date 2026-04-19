@@ -126,23 +126,21 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 .glass-tab-bar {
-  /* Docked nav: full width, flush to the bottom edge */
   left:       0 !important;
   right:      0 !important;
   transform:  none !important;
   bottom:     0 !important;
   width:      100% !important;
   margin:     0 !important;
-  /* In Safari browser mode env() returns 0 — no extra padding needed */
-  padding:    10px 10px env(safe-area-inset-bottom, 0px) !important;
+  padding:    10px 12px env(safe-area-inset-bottom, 0px) !important;
 
-  background:    var(--tabbar-bg) !important;
-  backdrop-filter:         blur(24px) saturate(170%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
+  background:              var(--tabbar-bg) !important;
+  backdrop-filter:         blur(32px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
   border:        none !important;
   border-top:    1px solid var(--ge) !important;
   border-radius: 0 !important;
-  box-shadow:    none !important;
+  box-shadow:    0 -6px 24px rgba(0,0,0,0.10) !important;
 }
 
 /* Standalone PWA: push nav bar below safe-area-bottom so it fills the physical gap */
@@ -151,6 +149,14 @@
     bottom: calc(-1 * env(safe-area-inset-bottom, 34px)) !important;
     padding-bottom: calc(10px + env(safe-area-inset-bottom, 34px)) !important;
   }
+}
+
+/* Active tab pill animation */
+.nav-pill {
+  transition: background 0.22s ease, border-color 0.22s ease, transform 0.18s cubic-bezier(0.34,1.56,0.64,1) !important;
+}
+.nav-pill:active {
+  transform: scale(0.92) !important;
 }
 
 /* Scan receipt scan-line animation */

@@ -387,6 +387,7 @@ export default function App({ onReady }) {
   const [userCurrency, setUserCurrency] = useState(null);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [reportFreq, setReportFreq] = useState("weekly");
+  const [defaultPayment, setDefaultPayment] = useState("");
   const [userTheme, setUserTheme] = useState(() => {
     try { return localStorage.getItem("track_theme") || "default"; } catch { return "default"; }
   });
@@ -486,6 +487,8 @@ export default function App({ onReady }) {
   );
   const formatMoneyRef = useRef(formatMoney);
   useEffect(() => { formatMoneyRef.current = formatMoney; }, [formatMoney]);
+  const defaultPaymentRef = useRef("");
+  useEffect(() => { defaultPaymentRef.current = defaultPayment; }, [defaultPayment]);
   const profileTagUuidRef = useRef("");
   useEffect(() => { profileTagUuidRef.current = profileTagUuid || ""; }, [profileTagUuid]);
 
@@ -911,6 +914,7 @@ export default function App({ onReady }) {
           if (d.userCurrency && typeof d.userCurrency === "object" && d.userCurrency.code) setUserCurrency(d.userCurrency);
           else setUserCurrency(null);
           if (typeof d.reportFreq === "string" && ["daily", "weekly", "monthly"].includes(d.reportFreq)) setReportFreq(d.reportFreq);
+          if (typeof d.defaultPayment === "string" && d.defaultPayment) setDefaultPayment(d.defaultPayment);
           if (typeof d.theme === "string" && THEMES[d.theme]) { setUserTheme(d.theme); try { localStorage.setItem("track_theme", d.theme); } catch {} }
           if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
             setTips(d.aiInsights.items);
@@ -1709,6 +1713,28 @@ export default function App({ onReady }) {
     return m;
   }, [monthTxs, profileTagUuid, selfFbUid]);
 
+  const trendData = useMemo(() => {
+    if (df === "today") {
+      const prevTxs = txs.filter((t) => t.date === dAgo(1));
+      return { label: "yesterday", prevTotal: tot(prevTxs, profileTagUuid, selfFbUid) };
+    }
+    if (df === "week") {
+      const now = new Date();
+      const thisStart = new Date(now); thisStart.setDate(thisStart.getDate() - 7); thisStart.setHours(0,0,0,0);
+      const prevStart = new Date(thisStart); prevStart.setDate(prevStart.getDate() - 7);
+      const prevTxs = txs.filter((t) => { const d = new Date(t.date + "T12:00:00"); return d >= prevStart && d < thisStart; });
+      return { label: "last week", prevTotal: tot(prevTxs, profileTagUuid, selfFbUid) };
+    }
+    if (df === "month") {
+      const now = new Date();
+      const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const prevTxs = txs.filter((t) => { const d = new Date(t.date + "T12:00:00"); return d >= prevMonthStart && d <= prevMonthEnd; });
+      return { label: "last month", prevTotal: tot(prevTxs, profileTagUuid, selfFbUid) };
+    }
+    return null;
+  }, [df, txs, profileTagUuid, selfFbUid]);
+
   /**
    * Aggregate split-bill activity for the current filter range.
    *
@@ -2022,7 +2048,8 @@ export default function App({ onReady }) {
     setStep("success");
     setTimeout(() => {
       setStep("mode");
-      const pay = catalogRef.current.payments[0] || "";
+      const defPay = defaultPaymentRef.current;
+      const pay = (defPay && catalogRef.current.payments.includes(defPay)) ? defPay : catalogRef.current.payments[0] || "";
       setForm({ amount: "", category: "", date: tdStr(), payment: pay, notes: "", tags: "" });
       setSplitOn(false);
       setSplitPpl([]);
@@ -2671,7 +2698,8 @@ export default function App({ onReady }) {
     setTimeout(() => {
       setStep("mode");
       setBulkSuccess(null);
-      const pay = catalogRef.current.payments[0] || "";
+      const defPay2 = defaultPaymentRef.current;
+      const pay = (defPay2 && catalogRef.current.payments.includes(defPay2)) ? defPay2 : catalogRef.current.payments[0] || "";
       setForm({ amount: "", category: "", date: tdStr(), payment: pay, notes: "", tags: "" });
       setTab("home");
       dlg.toast(`Imported ${count} · ${formatMoney(totalAmount)}`, { type: "success" });
@@ -3118,6 +3146,17 @@ export default function App({ onReady }) {
     if (uidRef.current) {
       try {
         await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { reportFreq: freq }, { merge: true });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
+  async function saveDefaultPayment(pay) {
+    setDefaultPayment(pay);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { defaultPayment: pay }, { merge: true });
       } catch (e) {
         console.error(e);
       }
@@ -4700,21 +4739,29 @@ export default function App({ onReady }) {
                     <label style={lbl}>
                       Payment <span style={{ color: T.dng }}>*</span>
                     </label>
-                    <select
-                      value={form.payment}
-                      onChange={(e) => setForm((p) => ({ ...p, payment: e.target.value }))}
-                      style={{
-                        ...inp,
-                        width: "100%",
-                        minWidth: 0,
-                        minHeight: 48,
-                        fontSize: 16,
-                      }}
-                    >
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, paddingTop: 2 }}>
                       {payments.map((pay) => (
-                        <option key={pay}>{pay}</option>
+                        <button
+                          key={pay}
+                          type="button"
+                          onClick={() => setForm((p) => ({ ...p, payment: pay }))}
+                          style={{
+                            padding: "9px 16px",
+                            borderRadius: 999,
+                            border: form.payment === pay ? "none" : `1px solid ${T.bdr}`,
+                            background: form.payment === pay ? T.acc : T.card2,
+                            color: form.payment === pay ? T.btnTxt : T.sub,
+                            fontSize: 13,
+                            fontWeight: form.payment === pay ? 700 : 400,
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                            minHeight: 40,
+                          }}
+                        >
+                          {pay}
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
                 </div>
 
@@ -4954,8 +5001,20 @@ export default function App({ onReady }) {
             </div>
 
             <div style={{ margin: `0 ${px}px 14px`, ...card }}>
-              <div style={{ fontSize: 12, color: T.sub, marginBottom: 4 }}>Total Spent</div>
-              <div style={{ fontSize: 34, fontWeight: 800 }}>{formatMoney(fTotal)}</div>
+              <div style={{ fontSize: 11, color: T.sub, marginBottom: 4, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.7px" }}>Total Spent</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 34, fontWeight: 800 }}>{formatMoney(fTotal)}</div>
+                {trendData && trendData.prevTotal > 0 && (() => {
+                  const chg = ((fTotal - trendData.prevTotal) / trendData.prevTotal) * 100;
+                  const isDown = chg < -1;
+                  const isUp = chg > 1;
+                  return (
+                    <span style={{ fontSize: 11, fontWeight: 700, background: isDown ? T.adim : isUp ? T.ddim : `${T.sub}18`, color: isDown ? T.acc : isUp ? T.dng : T.sub, borderRadius: 6, padding: "2px 8px", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                      {isDown ? "↓" : isUp ? "↑" : "~"}{Math.abs(Math.round(chg))}% vs {trendData.label}
+                    </span>
+                  );
+                })()}
+              </div>
               <div style={{ fontSize: 13, color: T.sub, marginTop: 3 }}>{filtered.length} transactions</div>
             </div>
 
@@ -5333,8 +5392,9 @@ export default function App({ onReady }) {
               <div style={{ fontSize: comfortable ? 24 : 20, fontWeight: 800, marginBottom: 12 }}>AI Reports</div>
               <div style={{ display: "flex", gap: 4, background: T.card2, borderRadius: 12, padding: 4, marginBottom: 14 }}>
                 {[
-                  { id: "spending", label: "Spending Report", Icon: BarChart2 },
+                  { id: "spending", label: "Spending", Icon: BarChart2 },
                   { id: "insights", label: "AI Insights", Icon: Sparkles },
+                  { id: "history", label: "History", Icon: ClipboardList },
                 ].map((st) => (
                   <button
                     key={st.id}
@@ -5449,6 +5509,75 @@ export default function App({ onReady }) {
                 )}
               </div>
             )}
+
+            {reportSubTab === "history" && (() => {
+              const byMonth = {};
+              txs.forEach((tx) => {
+                const d = new Date((tx.date || "") + "T00:00:00");
+                if (isNaN(d.getTime())) return;
+                const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                if (!byMonth[mk]) byMonth[mk] = { txs: [], total: 0 };
+                byMonth[mk].txs.push(tx);
+                byMonth[mk].total += effectiveAmount(tx, profileTagUuid, selfFbUid);
+              });
+              const history = Object.entries(byMonth)
+                .sort(([a], [b]) => b.localeCompare(a))
+                .map(([mk, data]) => {
+                  const [y, m] = mk.split("-");
+                  const label = new Date(+y, +m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+                  const catMap = {};
+                  data.txs.forEach((t) => { catMap[t.category] = (catMap[t.category] || 0) + t.amount; });
+                  const topCat = Object.entries(catMap).sort(([, a], [, b]) => b - a)[0];
+                  const payMap = {};
+                  data.txs.forEach((t) => { payMap[t.payment || "Unknown"] = (payMap[t.payment || "Unknown"] || 0) + 1; });
+                  const topPay = Object.entries(payMap).sort(([, a], [, b]) => b - a)[0];
+                  return { mk, label, total: data.total, count: data.txs.length, topCat: topCat?.[0] || "", topCatAmount: topCat?.[1] || 0, topPay: topPay?.[0] || "" };
+                });
+              return (
+                <div style={{ padding: `0 ${px}px 16px` }}>
+                  {history.length === 0 ? (
+                    <div style={{ ...card, textAlign: "center", padding: 32 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No history yet</div>
+                      <div style={{ fontSize: 12, color: T.sub }}>Add expenses to see your monthly summaries here</div>
+                    </div>
+                  ) : history.map((m, i) => {
+                    const prev = history[i + 1];
+                    const chg = prev && prev.total > 0 ? ((m.total - prev.total) / prev.total) * 100 : null;
+                    const cat = getCat(categories, m.topCat);
+                    return (
+                      <div key={m.mk} style={{ ...card, marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700 }}>{m.label}</div>
+                            <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{m.count} transaction{m.count !== 1 ? "s" : ""}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 22, fontWeight: 800 }}>{formatMoney(m.total)}</div>
+                            {chg !== null && (
+                              <span style={{ fontSize: 10, fontWeight: 700, color: chg > 0 ? T.dng : T.acc, background: chg > 0 ? T.ddim : T.adim, borderRadius: 5, padding: "2px 7px" }}>
+                                {chg > 0 ? "↑" : "↓"}{Math.abs(Math.round(chg))}% vs prev
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {m.topCat && (
+                            <span style={{ fontSize: 11, background: `${cat.c}18`, color: cat.c, borderRadius: 6, padding: "3px 9px", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <CategoryIcon name={m.topCat} size={11} color={cat.c} /> {m.topCat}
+                            </span>
+                          )}
+                          {m.topPay && (
+                            <span style={{ fontSize: 11, background: T.card2, color: T.sub, borderRadius: 6, padding: "3px 9px", border: `1px solid ${T.bdr}` }}>
+                              {m.topPay}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -5807,6 +5936,14 @@ export default function App({ onReady }) {
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
+                      </select>
+                    ),
+                  },
+                  {
+                    Icon: Wallet, label: "Default Payment", sub: defaultPayment || (payments[0] || "Not set"), color: T.blue, onClick: null,
+                    right: (
+                      <select value={defaultPayment || payments[0] || ""} onChange={(e) => void saveDefaultPayment(e.target.value)} onClick={(e) => e.stopPropagation()} style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}>
+                        {payments.map((p) => <option key={p} value={p}>{p}</option>)}
                       </select>
                     ),
                   },

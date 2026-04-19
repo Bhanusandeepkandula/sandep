@@ -261,12 +261,26 @@ export function SpendingReport({
       topCategoriesByVolume: splitAnalytics.byCategory.slice(0, 5).map((c) => ({ name: c.name, value: Math.round(c.value) })),
     } : null;
 
+    const now = new Date();
+    const dayOfMonth = now.getDate();
+    const projectedMonthEnd = dayOfMonth > 0 ? Math.round((monthly.thisTotal / dayOfMonth) * 30) : 0;
+    const top5Txs = [...txs]
+      .filter((t) => { const d = new Date(t.date + "T00:00:00"); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); })
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+      .map((t) => ({ date: t.date, amount: t.amount, category: t.category, notes: t.notes || "" }));
+    const catFreq = {};
+    txs.forEach((t) => { catFreq[t.category] = (catFreq[t.category] || 0) + 1; });
+    const topCatsByFreq = Object.entries(catFreq).sort(([,a],[,b]) => b-a).slice(0,5).map(([c,n]) => ({ category: c, count: n }));
     const data = {
       currency,
+      dayOfMonth,
+      projectedMonthEnd,
       weekly: {
         thisWeekTotal: weekly.thisTotal,
         lastWeekTotal: weekly.lastTotal,
         changePercent: Math.round(weekly.change),
+        transactionCounts: { thisWeek: weekly.thisCount, lastWeek: weekly.lastCount },
         topChanges: weekly.catComparison.slice(0, 8),
       },
       monthly: {
@@ -275,15 +289,20 @@ export function SpendingReport({
         changePercent: Math.round(monthly.change),
         thisMonth: monthly.thisLabel,
         lastMonth: monthly.lastLabel,
+        transactionCounts: { thisMonth: monthly.thisCount, lastMonth: monthly.lastCount },
+        avgDailySpend: dayOfMonth > 0 ? Math.round(monthly.thisTotal / dayOfMonth) : 0,
         topChanges: monthly.catComparison.slice(0, 10),
         paymentMethods: monthly.thisPay,
       },
       budgets: Object.entries(budgets).map(([cat, limit]) => ({
         cat, limit, spent: catSpent[cat] || 0,
         pct: Math.round(((catSpent[cat] || 0) / limit) * 100),
+        status: (catSpent[cat] || 0) > limit ? "over" : (catSpent[cat] || 0) >= limit * 0.8 ? "near" : "ok",
       })),
       fixedMonthlyExpenses: fixedTotal,
       overallCap: monthlyBudgetTotal,
+      top5TransactionsByAmount: top5Txs,
+      topCategoriesByFrequency: topCatsByFreq,
       splits: splitSnapshot,
     };
 
@@ -299,19 +318,20 @@ export function SpendingReport({
             {
               role: "system",
               content:
-                `You are a personal finance analyst. Generate a detailed spending report from the user's REAL data. ` +
+                `You are a personal finance analyst. Generate a detailed, data-driven spending report from the user's REAL transaction data. ` +
+                `Use actual numbers, category names, and payment methods from the data — never invent figures. ` +
                 `Return ONLY valid JSON with this exact structure: ` +
-                `{"summary": "2-3 sentence executive summary with real numbers in ${currency}", ` +
-                `"weekHighlight": "1 sentence about this week vs last week with amounts", ` +
-                `"monthHighlight": "1 sentence about this month vs last month with amounts", ` +
-                `"alerts": ["array of 1-3 short warning strings about overspending or concerning trends"], ` +
-                `"positives": ["array of 1-3 short positive findings"], ` +
-                `"recommendations": ["array of 2-4 actionable recommendations with specific amounts"], ` +
-                `"score": number 1-100 representing overall financial health this period}` +
-                ` When \`splits\` is present, at least one alert / recommendation MUST address shared-bill balances ` +
-                `(e.g. "chase {name} for ${currency} X owed", "settle ${currency} Y with {name} this week", ` +
-                `or call out recurring split categories). ` +
-                `Use real amounts from the data. No markdown, no explanation, ONLY the JSON object.`,
+                `{"summary": "3-4 sentence executive summary covering month total, projected month-end, top category, and key trend in ${currency}", ` +
+                `"weekHighlight": "1-2 sentences about this week vs last week with exact amounts and biggest category change", ` +
+                `"monthHighlight": "1-2 sentences about this month vs last month with exact amounts and which categories drove the change", ` +
+                `"alerts": ["2-4 short warning strings about overspending, budget breaches, concerning trends, or upcoming projected overruns"], ` +
+                `"positives": ["2-3 short positive findings about savings, reduced spending categories, or good habits"], ` +
+                `"recommendations": ["3-5 specific, actionable recommendations with exact ${currency} amounts and concrete steps (e.g. 'Reduce Food to X/week by cooking 3 days', not vague advice)"], ` +
+                `"score": number 1-100 representing overall financial health (100=well within budget, 0=severely over)}` +
+                ` When \`splits\` is present, at least one recommendation MUST address shared-bill balances. ` +
+                ` When \`top5TransactionsByAmount\` has data, mention the single largest expense in the summary or alerts. ` +
+                ` When \`projectedMonthEnd\` > \`overallCap\`, flag it as a critical alert. ` +
+                `No markdown, no explanation, ONLY the JSON object.`,
             },
             { role: "user", content: `Spending data:\n${JSON.stringify(data, null, 2)}` },
           ],

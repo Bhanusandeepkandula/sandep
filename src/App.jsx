@@ -3219,7 +3219,7 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(92px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(104px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
@@ -7030,7 +7030,7 @@ export default function App({ onReady }) {
                 border: "none",
                 color: active ? T.acc : T.sub,
                 cursor: "pointer",
-                padding: "4px 2px",
+                padding: "8px 2px",
                 transition: "color .18s cubic-bezier(0.22,1,0.36,1)",
                 minWidth: 0,
               }}
@@ -7040,7 +7040,7 @@ export default function App({ onReady }) {
                 alignItems: "center",
                 justifyContent: "center",
                 width: 36,
-                height: 28,
+                height: 32,
               }}>
                 {item.icon}
               </span>

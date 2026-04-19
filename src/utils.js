@@ -1,9 +1,13 @@
 export const uid = () => Math.random().toString(36).slice(2, 9);
-export const tdStr = () => new Date().toISOString().split("T")[0];
+const localDate = (d) => {
+  const dd = d || new Date();
+  return `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, "0")}-${String(dd.getDate()).padStart(2, "0")}`;
+};
+export const tdStr = () => localDate();
 export const dAgo = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().split("T")[0];
+  return localDate(d);
 };
 
 /** @param {{ n: string, c: string, bg: string, e: string }[]} cats */

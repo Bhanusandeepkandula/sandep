@@ -145,13 +145,18 @@
   box-shadow:    none !important;
 }
 
-/* Standalone PWA: safe-area zone must be covered (no browser chrome to handle it) */
+/* Standalone PWA: push nav bar below safe-area-bottom so it fills the physical gap */
 @media (display-mode: standalone) {
   .glass-tab-bar {
-    padding-bottom: max(34px, env(safe-area-inset-bottom, 34px)) !important;
-    /* Extend background into physical safe-area zone in case env() returns 0 */
-    box-shadow: 0 60px 0 60px var(--tabbar-bg) !important;
+    bottom: calc(-1 * env(safe-area-inset-bottom, 34px)) !important;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 34px)) !important;
   }
+}
+
+/* Scan receipt scan-line animation */
+@keyframes scan-line-move {
+  0%, 100% { transform: translateY(18px); opacity: 0.9; }
+  50%       { transform: translateY(64px); opacity: 1; }
 }
 
 /* Active tab item — dot under icon only, no fill */

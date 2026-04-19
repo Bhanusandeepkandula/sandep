@@ -146,7 +146,7 @@ export function applyTheme(name) {
   document.body.setAttribute("data-theme", T.id || "default");
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", T.bg);
-  document.documentElement.style.background = T.bg;
+  document.documentElement.style.background = T.card;
   const root = document.getElementById("root");
   if (root) root.style.background = T.bg;
 }

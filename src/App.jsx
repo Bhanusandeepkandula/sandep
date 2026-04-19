@@ -3426,27 +3426,19 @@ export default function App({ onReady }) {
 
                   {monthBudgetRing && (
                     <div style={{ marginBottom: 14 }}>
-                      <div
-                        style={{
-                          height: 6,
-                          borderRadius: 999,
-                          background: T.card2,
-                          overflow: "hidden",
-                          position: "relative",
-                        }}
-                      >
-                        <div
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: `${Math.min(100, spentFrac * 100)}%`,
-                            background: barColor,
-                            borderRadius: 999,
-                            transition: "width 0.45s ease, background 0.25s ease",
-                          }}
-                        />
+                      <div style={{ display: "flex", gap: 3 }}>
+                        {Array.from({ length: 20 }, (_, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              flex: 1,
+                              height: 5,
+                              borderRadius: 2,
+                              background: i < Math.round(Math.min(1, spentFrac) * 20) ? barColor : T.bdr,
+                              transition: "background 0.4s ease",
+                            }}
+                          />
+                        ))}
                       </div>
                     </div>
                   )}
@@ -3610,16 +3602,18 @@ export default function App({ onReady }) {
                       style={{
                         ...card,
                         margin: 0,
-                        padding: "12px 14px",
+                        padding: "14px",
                         display: "flex",
                         flexDirection: "column",
-                        gap: 4,
-                        borderLeft: `3px solid ${m.accent}`,
+                        gap: 2,
                       }}
                     >
-                      <div style={{ fontSize: 10, color: T.sub, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>{m.label}</div>
-                      <div className="stat-display" style={{ fontSize: 17, fontWeight: 700, color: T.txt, lineHeight: 1.1 }}>{m.val}</div>
-                      <div style={{ fontSize: 11, color: T.sub }}>{m.sub}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: m.accent, flexShrink: 0 }} />
+                        <div style={{ fontSize: 10, color: T.sub, textTransform: "uppercase", letterSpacing: "0.7px", fontWeight: 700 }}>{m.label}</div>
+                      </div>
+                      <div className="stat-display" style={{ fontSize: 20, fontWeight: 800, color: T.txt, lineHeight: 1 }}>{m.val}</div>
+                      <div style={{ fontSize: 11, color: T.sub, marginTop: 3 }}>{m.sub}</div>
                     </div>
                   ))}
                 </div>
@@ -3662,9 +3656,9 @@ export default function App({ onReady }) {
 
             <div style={{ padding: `0 ${px}px` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>Recent</div>
-                <button type="button" onClick={() => setTab("analytics")} style={{ background: "none", border: "none", color: T.acc, fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
-                  See all
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.8px" }}>Recent</div>
+                <button type="button" onClick={() => setTab("analytics")} style={{ background: "none", border: "none", color: T.acc, fontSize: 12, cursor: "pointer", fontWeight: 700, letterSpacing: "0.2px" }}>
+                  See all →
                 </button>
               </div>
               {txs.slice(0, 100).map((tx) => (
@@ -3770,8 +3764,7 @@ export default function App({ onReady }) {
                   maxWidth: maxShell,
                   marginLeft: "auto",
                   marginRight: "auto",
-                  background: T.id === "light" ? "rgba(240,240,245,0.98)" : "rgba(10,10,22,0.96)",
-                  backdropFilter: "blur(8px)",
+                  background: T.bg,
                   display: "flex",
                   flexDirection: "column",
                   paddingTop: safeTop,
@@ -3802,28 +3795,41 @@ export default function App({ onReady }) {
                   <ArrowLeft size={20} /> Cancel scan
                 </button>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: 0 }}>
-                  <div
-                    className="spin"
-                    style={{
-                      width: 48,
-                      height: 48,
-                      border: `3px solid ${T.bdr}`,
-                      borderTopColor: T.acc,
-                      borderRadius: "50%",
-                      marginBottom: 20,
-                    }}
-                  />
-                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Scanning receipt…</div>
-                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 24, lineHeight: 1.45, maxWidth: 300 }}>
-                    Large photos or a slow connection can take 30–60 seconds. Keep this screen open.
+                  {/* Animated receipt SVG */}
+                  <div style={{ position: "relative", width: 72, height: 94, marginBottom: 28 }}>
+                    <svg width="72" height="94" viewBox="0 0 72 94" fill="none" style={{ overflow: "visible" }}>
+                      {/* Receipt body */}
+                      <rect x="4" y="4" width="64" height="80" rx="8" fill={T.card} stroke={T.bdr} strokeWidth="1.5"/>
+                      {/* Zig-zag bottom edge */}
+                      <polyline points="4,80 10,74 16,80 22,74 28,80 34,74 40,80 46,74 52,80 58,74 64,80 68,76" stroke={T.bdr} strokeWidth="1.5" fill="none"/>
+                      {/* Content lines */}
+                      <rect x="14" y="20" width="44" height="3" rx="1.5" fill={T.bdr}/>
+                      <rect x="14" y="31" width="28" height="3" rx="1.5" fill={T.bdr} opacity="0.7"/>
+                      <rect x="14" y="41" width="36" height="3" rx="1.5" fill={T.bdr} opacity="0.6"/>
+                      <rect x="14" y="51" width="20" height="3" rx="1.5" fill={T.bdr} opacity="0.5"/>
+                      {/* Total line */}
+                      <rect x="14" y="64" width="44" height="5" rx="2.5" fill={T.acc} opacity="0.3"/>
+                      {/* Animated scan line */}
+                      <line x1="10" y1="0" x2="62" y2="0" stroke={T.acc} strokeWidth="2" strokeLinecap="round" opacity="0.9">
+                        <animateTransform attributeName="transform" type="translate" values="0,18; 0,66; 0,18" dur="1.8s" repeatCount="indefinite" calcMode="paced"/>
+                      </line>
+                      {/* Scan line soft glow */}
+                      <line x1="8" y1="0" x2="64" y2="0" stroke={T.acc} strokeWidth="8" strokeLinecap="round" opacity="0.12">
+                        <animateTransform attributeName="transform" type="translate" values="0,18; 0,66; 0,18" dur="1.8s" repeatCount="indefinite" calcMode="paced"/>
+                      </line>
+                    </svg>
                   </div>
-                  <div style={{ textAlign: "left", width: "100%", maxWidth: 320, fontSize: 13 }}>
+                  <div style={{ fontSize: 19, fontWeight: 800, marginBottom: 6, letterSpacing: "-0.3px" }}>Scanning receipt…</div>
+                  <div style={{ fontSize: 13, color: T.sub, marginBottom: 28, lineHeight: 1.5, maxWidth: 270 }}>
+                    Keep this screen open. Large photos can take 30–60 s.
+                  </div>
+                  <div style={{ width: "100%", maxWidth: 300 }}>
                     {(scanPhaseOrderRef.current.length ? scanPhaseOrderRef.current : ["read", "ai", "parse"]).map((id, i, order) => {
                       const labels = {
-                        read: "Reading file from your device",
-                        ocr: "Extracting text from file",
-                        ai: "Sending to OpenAI for analysis",
-                        parse: "Parsing total, category & lines",
+                        read: "Reading file",
+                        ocr: "Extracting text",
+                        ai: "AI analysis",
+                        parse: "Parsing result",
                       };
                       const phase = order.includes(scanPhase) ? scanPhase : order[0];
                       const idx = order.indexOf(phase);
@@ -3835,15 +3841,40 @@ export default function App({ onReady }) {
                           style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: 10,
-                            padding: "10px 0",
-                            borderBottom: i < order.length - 1 ? `1px solid ${T.bdr}` : "none",
-                            color: done || active ? T.txt : T.mut,
-                            fontWeight: active ? 700 : 500,
+                            gap: 12,
+                            padding: "10px 14px",
+                            borderRadius: T.r,
+                            background: done ? T.adim : active ? T.card2 : "transparent",
+                            marginBottom: 6,
+                            border: `1px solid ${done ? T.acc + "40" : active ? T.bdr : "transparent"}`,
+                            transition: "all 0.3s ease",
                           }}
                         >
-                          <span style={{ width: 22, textAlign: "center" }}>{done ? "✓" : active ? "…" : "○"}</span>
-                          {labels[id] || id}
+                          <div
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 8,
+                              background: done ? T.adim : T.card,
+                              border: `1px solid ${done ? T.acc + "60" : T.bdr}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              transition: "all 0.3s ease",
+                            }}
+                          >
+                            {done ? (
+                              <Check size={14} color={T.acc} strokeWidth={2.5} />
+                            ) : active ? (
+                              <div className="spin" style={{ width: 12, height: 12, border: `2px solid ${T.bdr}`, borderTopColor: T.acc, borderRadius: "50%" }} />
+                            ) : (
+                              <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.bdr }} />
+                            )}
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: active ? 700 : done ? 600 : 400, color: done ? T.acc : active ? T.txt : T.sub, transition: "all 0.3s ease" }}>
+                            {labels[id] || id}
+                          </span>
                         </div>
                       );
                     })}

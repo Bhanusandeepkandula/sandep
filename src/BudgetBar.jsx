@@ -26,19 +26,8 @@ export function BudgetBar({ cat, limit, spent, categories, formatMoney }) {
           <span style={{ fontSize: 12, color: T.sub }}> / {formatMoney(limit)}</span>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 3 }}>
-        {Array.from({ length: 20 }, (_, i) => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              height: 5,
-              borderRadius: 2,
-              background: i < Math.round((pct / 100) * 20) ? barC : T.bdr,
-              transition: "background 0.4s ease",
-            }}
-          />
-        ))}
+      <div style={{ height: 5, background: T.bdr, borderRadius: 999, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: barC, borderRadius: 999, transition: "width .6s ease" }} />
       </div>
     </div>
   );

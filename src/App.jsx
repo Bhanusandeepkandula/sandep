@@ -41,6 +41,7 @@ import {
   Palette,
   BrainCircuit,
   AlertTriangle,
+  Calendar,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import ReactCountryFlag from "react-country-flag";
@@ -388,6 +389,7 @@ export default function App({ onReady }) {
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [reportFreq, setReportFreq] = useState("weekly");
   const [defaultPayment, setDefaultPayment] = useState("");
+  const [cycleDay, setCycleDay] = useState(1);
   const [userTheme, setUserTheme] = useState(() => {
     try { return localStorage.getItem("track_theme") || "default"; } catch { return "default"; }
   });
@@ -915,6 +917,7 @@ export default function App({ onReady }) {
           else setUserCurrency(null);
           if (typeof d.reportFreq === "string" && ["daily", "weekly", "monthly"].includes(d.reportFreq)) setReportFreq(d.reportFreq);
           if (typeof d.defaultPayment === "string" && d.defaultPayment) setDefaultPayment(d.defaultPayment);
+          if (typeof d.cycleDay === "number" && d.cycleDay >= 1 && d.cycleDay <= 28) setCycleDay(d.cycleDay);
           if (typeof d.theme === "string" && THEMES[d.theme]) { setUserTheme(d.theme); try { localStorage.setItem("track_theme", d.theme); } catch {} }
           if (d.aiInsights && typeof d.aiInsights === "object" && Array.isArray(d.aiInsights.items)) {
             setTips(d.aiInsights.items);
@@ -1634,20 +1637,46 @@ export default function App({ onReady }) {
   }, [tab, step, categories, form.category, scanMissingFieldKeys]);
 
   const selfFbUid = firebaseUser?.uid || "";
-  const filtered = useMemo(() => filterTx(txs, df, cS, cE), [txs, df, cS, cE]);
+  const cycleRange = useMemo(() => {
+    if (cycleDay <= 1) return null;
+    const now = new Date();
+    const d = now.getDate();
+    let s, e;
+    if (d >= cycleDay) {
+      s = new Date(now.getFullYear(), now.getMonth(), cycleDay);
+      e = new Date(now.getFullYear(), now.getMonth() + 1, cycleDay - 1);
+    } else {
+      s = new Date(now.getFullYear(), now.getMonth() - 1, cycleDay);
+      e = new Date(now.getFullYear(), now.getMonth(), cycleDay - 1);
+    }
+    const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    return { start: fmt(s), end: fmt(e), startDate: s, endDate: e };
+  }, [cycleDay]);
+
+  const filtered = useMemo(() => {
+    if (df === "month" && cycleRange) return filterTx(txs, "custom", cycleRange.start, cycleRange.end);
+    return filterTx(txs, df, cS, cE);
+  }, [txs, df, cS, cE, cycleRange]);
   const fTotal = useMemo(() => tot(filtered, profileTagUuid, selfFbUid), [filtered, profileTagUuid, selfFbUid]);
-  const monthTxs = useMemo(() => filterTx(txs, "month"), [txs]);
+  const monthTxs = useMemo(() => {
+    if (cycleRange) return filterTx(txs, "custom", cycleRange.start, cycleRange.end);
+    return filterTx(txs, "month");
+  }, [txs, cycleRange]);
   const monthTotal = useMemo(() => tot(monthTxs, profileTagUuid, selfFbUid), [monthTxs, profileTagUuid, selfFbUid]);
   const todayTxs = useMemo(() => txs.filter((t) => t.date === tdStr()), [txs]);
   const todayTotal = useMemo(() => tot(todayTxs, profileTagUuid, selfFbUid), [todayTxs, profileTagUuid, selfFbUid]);
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
   const weekTotal = useMemo(() => tot(weekTxs, profileTagUuid, selfFbUid), [weekTxs, profileTagUuid, selfFbUid]);
 
-  /** Human label for the calendar month used by "This Month" (same rule as `filterTx(..., "month")`). */
   const calendarMonthLabel = useMemo(() => {
+    if (cycleRange) {
+      const loc = (locale && String(locale).trim()) || undefined;
+      const opts = { day: "numeric", month: "short" };
+      return `${cycleRange.startDate.toLocaleDateString(loc, opts)} – ${cycleRange.endDate.toLocaleDateString(loc, opts)}`;
+    }
     const loc = (locale && String(locale).trim()) || undefined;
     return new Date().toLocaleDateString(loc, { month: "long", year: "numeric" });
-  }, [locale]);
+  }, [locale, cycleRange]);
 
   /** Expenses whose `date` is not in the current calendar month (common after CSV import from bank screenshots). */
   const expenseCountOutsideThisCalendarMonth = useMemo(() => {
@@ -3163,6 +3192,17 @@ export default function App({ onReady }) {
     }
   }
 
+  async function saveCycleDay(day) {
+    setCycleDay(day);
+    if (uidRef.current) {
+      try {
+        await setDoc(doc(db, "users", uidRef.current, "settings", "app"), { cycleDay: day }, { merge: true });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
   async function saveUserCurrency(cur) {
     setUserCurrency(cur);
     setShowCurrencyPicker(false);
@@ -3415,7 +3455,10 @@ export default function App({ onReady }) {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 14 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+                      onClick={() => { setTab("analytics"); setDf("month"); }}
+                    >
                       <div style={{ fontSize: 12, color: T.sub, marginBottom: 4, fontWeight: 600, letterSpacing: 0.2, textTransform: "uppercase" }}>This Month</div>
                       <div className="stat-display" style={{ fontSize: 40, lineHeight: 1.0, color: T.txt }}>{formatMoney(monthTotal)}</div>
                       {monthBudgetRing && (
@@ -3465,19 +3508,8 @@ export default function App({ onReady }) {
 
                   {monthBudgetRing && (
                     <div style={{ marginBottom: 14 }}>
-                      <div style={{ display: "flex", gap: 3 }}>
-                        {Array.from({ length: 20 }, (_, i) => (
-                          <div
-                            key={i}
-                            style={{
-                              flex: 1,
-                              height: 5,
-                              borderRadius: 2,
-                              background: i < Math.round(Math.min(1, spentFrac) * 20) ? barColor : T.bdr,
-                              transition: "background 0.4s ease",
-                            }}
-                          />
-                        ))}
+                      <div style={{ height: 5, background: T.bdr, borderRadius: 999, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${Math.round(spentFrac * 100)}%`, background: barColor, borderRadius: 999, transition: "width .6s ease" }} />
                       </div>
                     </div>
                   )}
@@ -5948,6 +5980,17 @@ export default function App({ onReady }) {
                       </select>
                     ),
                   },
+                  {
+                    Icon: Calendar, label: "Salary / Cycle Date", sub: cycleDay > 1 ? `Month: ${cycleDay}th → ${cycleDay - 1}th next` : "Calendar month (default)", color: T.acc, onClick: null,
+                    right: (
+                      <select value={cycleDay} onChange={(e) => void saveCycleDay(Number(e.target.value))} onClick={(e) => e.stopPropagation()} style={{ background: T.card2, border: `1px solid ${T.bdr}`, color: T.txt, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}>
+                        <option value={1}>Calendar month</option>
+                        {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    ),
+                  },
                   { Icon: Bell, label: "Notifications", sub: "Daily reminders & alerts", color: T.warn, onClick: null, right: null },
                 ];
                 return rows.map((item, i) => (
@@ -6971,7 +7014,7 @@ export default function App({ onReady }) {
       ) : null}
     </div>
 
-    {/* ── Redesigned Glass Tab Bar ── */}
+    {/* ── Tab Bar ── */}
       <div
         className="glass-tab-bar"
         style={{
@@ -6984,11 +7027,11 @@ export default function App({ onReady }) {
         }}
       >
         {[
-          { id: "home",      Icon: Home,        label: "Home"     },
-          { id: "analytics", Icon: BarChart2,   label: "Stats"    },
-          { id: "ADD",       Icon: null,         label: ""         },
-          { id: "reports",   Icon: BrainCircuit, label: "Reports"  },
-          { id: "budgets",   Icon: Wallet,       label: "Budgets"  },
+          { id: "home",      Icon: Home,        label: "Home"    },
+          { id: "analytics", Icon: BarChart2,   label: "Stats"   },
+          { id: "ADD",       Icon: null,        label: ""        },
+          { id: "reports",   Icon: BrainCircuit, label: "Reports" },
+          { id: "budgets",   Icon: Wallet,      label: "Budgets" },
         ].map((item) => {
           if (item.id === "ADD")
             return (
@@ -6997,8 +7040,8 @@ export default function App({ onReady }) {
                 key="add"
                 onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 54,
-                  height: 54,
+                  width: 48,
+                  height: 48,
                   borderRadius: "50%",
                   background: T.acc,
                   border: `4px solid var(--tabbar-bg, ${T.card})`,
@@ -7006,13 +7049,12 @@ export default function App({ onReady }) {
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  transform: "translateY(-18px)",
+                  transform: "translateY(-14px)",
                   flexShrink: 0,
-                  boxShadow: `0 4px 20px ${T.acc}70, 0 0 0 1px ${T.acc}30`,
-                  transition: "transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.18s",
+                  boxShadow: `0 4px 20px ${T.acc}70`,
                 }}
               >
-                <Plus size={24} color={T.btnTxt} strokeWidth={2.8} />
+                <Plus size={22} color={T.btnTxt} strokeWidth={2.5} />
               </button>
             );
           const active = tab === item.id;
@@ -7027,46 +7069,25 @@ export default function App({ onReady }) {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 0,
+                gap: 4,
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                padding: "4px 2px 6px",
+                padding: "6px 4px",
                 minWidth: 0,
               }}
             >
-              {/* Pill container */}
-              <div
-                className="nav-pill"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 3,
-                  padding: "7px 12px",
-                  borderRadius: 16,
-                  background: active ? T.adim : "transparent",
-                  border: `1px solid ${active ? T.acc + "35" : "transparent"}`,
-                  minWidth: 44,
-                }}
-              >
-                <item.Icon
-                  size={22}
-                  color={active ? T.acc : T.sub}
-                  strokeWidth={active ? 2.2 : 1.7}
-                />
-                <span style={{
-                  fontSize: 10,
-                  fontWeight: active ? 700 : 500,
-                  color: active ? T.acc : T.sub,
-                  letterSpacing: active ? "-0.2px" : "0px",
-                  lineHeight: 1,
-                  opacity: active ? 1 : 0.75,
-                  textAlign: "center",
-                }}>
-                  {item.label}
-                </span>
-              </div>
+              <item.Icon size={22} color={active ? T.acc : T.sub} strokeWidth={active ? 2.2 : 1.7} />
+              <span style={{
+                fontSize: 10,
+                fontWeight: active ? 700 : 500,
+                color: active ? T.acc : T.sub,
+                lineHeight: 1,
+                textAlign: "center",
+                width: "100%",
+              }}>
+                {item.label}
+              </span>
             </button>
           );
         })}

@@ -502,7 +502,7 @@ export function SpendingReport({
             </div>
             {weekBarData.length > 0 && (
               <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={weekBarData} margin={{ left: 0, right: 0 }}>
+                <BarChart data={weekBarData} margin={{ top: 10, left: 0, right: 4, bottom: 0 }}>
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.sub }} tickLine={false} axisLine={false} />
                   <YAxis hide />
                   <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 8, color: T.txt, fontSize: 11 }} />
@@ -538,7 +538,7 @@ export function SpendingReport({
             </div>
             {monthBarData.length > 0 && (
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={monthBarData} margin={{ left: 0, right: 0 }}>
+                <BarChart data={monthBarData} margin={{ top: 10, left: 0, right: 4, bottom: 0 }}>
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.sub }} tickLine={false} axisLine={false} />
                   <YAxis hide />
                   <Tooltip formatter={(v) => [formatMoney(v)]} contentStyle={{ background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 8, color: T.txt, fontSize: 11 }} />

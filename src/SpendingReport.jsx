@@ -192,6 +192,7 @@ export function SpendingReport({
   budgets,
   catSpent,
   fixedTotal,
+  fixedExpenses = [],
   monthlyBudgetTotal,
   uid,
   reportFreq = "weekly",
@@ -202,8 +203,18 @@ export function SpendingReport({
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
 
-  const weekly = useMemo(() => buildWeeklyComparison(txs), [txs]);
-  const monthly = useMemo(() => buildMonthlyComparison(txs), [txs]);
+  /* Fixed expense category names — used to split discretionary from mandatory */
+  const fixedCats = useMemo(() => new Set(fixedExpenses.map((f) => f.category).filter(Boolean)), [fixedExpenses]);
+  const fixedNames = useMemo(() => new Set(fixedExpenses.map((f) => (f.name || "").toLowerCase().trim())), [fixedExpenses]);
+
+  /* Only discretionary transactions (not in a fixed-expense category) */
+  const discretionaryTxs = useMemo(() =>
+    txs.filter((t) => !fixedCats.has(t.category) && !fixedNames.has((t.notes || "").toLowerCase().trim())),
+    [txs, fixedCats, fixedNames]
+  );
+
+  const weekly = useMemo(() => buildWeeklyComparison(discretionaryTxs), [discretionaryTxs]);
+  const monthly = useMemo(() => buildMonthlyComparison(discretionaryTxs), [discretionaryTxs]);
 
   const weekBarData = useMemo(() =>
     weekly.catComparison.slice(0, 6).map((c) => ({
@@ -263,45 +274,55 @@ export function SpendingReport({
 
     const now = new Date();
     const dayOfMonth = now.getDate();
+    /* Use only discretionary totals for projections */
     const projectedMonthEnd = dayOfMonth > 0 ? Math.round((monthly.thisTotal / dayOfMonth) * 30) : 0;
-    const top5Txs = [...txs]
+    const top5Txs = [...discretionaryTxs]
       .filter((t) => { const d = new Date(t.date + "T00:00:00"); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); })
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5)
       .map((t) => ({ date: t.date, amount: t.amount, category: t.category, notes: t.notes || "" }));
     const catFreq = {};
-    txs.forEach((t) => { catFreq[t.category] = (catFreq[t.category] || 0) + 1; });
+    discretionaryTxs.forEach((t) => { catFreq[t.category] = (catFreq[t.category] || 0) + 1; });
     const topCatsByFreq = Object.entries(catFreq).sort(([,a],[,b]) => b-a).slice(0,5).map(([c,n]) => ({ category: c, count: n }));
+    const discretionaryBudget = Math.max(0, monthlyBudgetTotal - fixedTotal);
     const data = {
       currency,
       dayOfMonth,
-      projectedMonthEnd,
+      note: "All spending figures below are DISCRETIONARY only — mandatory/fixed expenses are listed separately and must NOT be targeted in recommendations.",
+      projectedDiscretionaryMonthEnd: projectedMonthEnd,
+      discretionaryBudget,
       weekly: {
-        thisWeekTotal: weekly.thisTotal,
-        lastWeekTotal: weekly.lastTotal,
+        thisWeekDiscretionary: weekly.thisTotal,
+        lastWeekDiscretionary: weekly.lastTotal,
         changePercent: Math.round(weekly.change),
         transactionCounts: { thisWeek: weekly.thisCount, lastWeek: weekly.lastCount },
         topChanges: weekly.catComparison.slice(0, 8),
       },
       monthly: {
-        thisMonthTotal: monthly.thisTotal,
-        lastMonthTotal: monthly.lastTotal,
+        thisMonthDiscretionary: monthly.thisTotal,
+        lastMonthDiscretionary: monthly.lastTotal,
         changePercent: Math.round(monthly.change),
         thisMonth: monthly.thisLabel,
         lastMonth: monthly.lastLabel,
         transactionCounts: { thisMonth: monthly.thisCount, lastMonth: monthly.lastCount },
-        avgDailySpend: dayOfMonth > 0 ? Math.round(monthly.thisTotal / dayOfMonth) : 0,
+        avgDailyDiscretionary: dayOfMonth > 0 ? Math.round(monthly.thisTotal / dayOfMonth) : 0,
         topChanges: monthly.catComparison.slice(0, 10),
         paymentMethods: monthly.thisPay,
       },
-      budgets: Object.entries(budgets).map(([cat, limit]) => ({
-        cat, limit, spent: catSpent[cat] || 0,
-        pct: Math.round(((catSpent[cat] || 0) / limit) * 100),
-        status: (catSpent[cat] || 0) > limit ? "over" : (catSpent[cat] || 0) >= limit * 0.8 ? "near" : "ok",
-      })),
-      fixedMonthlyExpenses: fixedTotal,
+      mandatoryFixedExpenses: {
+        totalFixed: fixedTotal,
+        items: fixedExpenses.map((f) => ({ name: f.name, amount: f.amount, category: f.category })),
+        pctOfBudget: monthlyBudgetTotal > 0 ? Math.round((fixedTotal / monthlyBudgetTotal) * 100) : 0,
+      },
+      budgets: Object.entries(budgets)
+        .filter(([cat]) => !fixedCats.has(cat))
+        .map(([cat, limit]) => ({
+          cat, limit, spent: catSpent[cat] || 0,
+          pct: Math.round(((catSpent[cat] || 0) / limit) * 100),
+          status: (catSpent[cat] || 0) > limit ? "over" : (catSpent[cat] || 0) >= limit * 0.8 ? "near" : "ok",
+        })),
       overallCap: monthlyBudgetTotal,
-      top5TransactionsByAmount: top5Txs,
+      top5DiscretionaryTransactions: top5Txs,
       topCategoriesByFrequency: topCatsByFreq,
       splits: splitSnapshot,
     };
@@ -318,19 +339,19 @@ export function SpendingReport({
             {
               role: "system",
               content:
-                `You are a personal finance analyst. Generate a detailed, data-driven spending report from the user's REAL transaction data. ` +
-                `Use actual numbers, category names, and payment methods from the data — never invent figures. ` +
+                `You are a personal finance analyst. Analyse ONLY the DISCRETIONARY spending data provided — mandatory/fixed expenses are listed separately under mandatoryFixedExpenses and MUST NOT appear in recommendations or alerts. ` +
+                `All amounts and category names come from real user data — never invent figures. ` +
                 `Return ONLY valid JSON with this exact structure: ` +
-                `{"summary": "3-4 sentence executive summary covering month total, projected month-end, top category, and key trend in ${currency}", ` +
-                `"weekHighlight": "1-2 sentences about this week vs last week with exact amounts and biggest category change", ` +
-                `"monthHighlight": "1-2 sentences about this month vs last month with exact amounts and which categories drove the change", ` +
-                `"alerts": ["2-4 short warning strings about overspending, budget breaches, concerning trends, or upcoming projected overruns"], ` +
-                `"positives": ["2-3 short positive findings about savings, reduced spending categories, or good habits"], ` +
-                `"recommendations": ["3-5 specific, actionable recommendations with exact ${currency} amounts and concrete steps (e.g. 'Reduce Food to X/week by cooking 3 days', not vague advice)"], ` +
-                `"score": number 1-100 representing overall financial health (100=well within budget, 0=severely over)}` +
-                ` When \`splits\` is present, at least one recommendation MUST address shared-bill balances. ` +
-                ` When \`top5TransactionsByAmount\` has data, mention the single largest expense in the summary or alerts. ` +
-                ` When \`projectedMonthEnd\` > \`overallCap\`, flag it as a critical alert. ` +
+                `{"summary": "3-4 sentence overview of discretionary spending this month: total, projected month-end, top discretionary category, and key trend in ${currency}", ` +
+                `"weekHighlight": "1-2 sentences on this week vs last week discretionary spend with exact amounts", ` +
+                `"monthHighlight": "1-2 sentences on this month vs last month discretionary spend with exact amounts and which categories drove the change", ` +
+                `"alerts": ["2-4 warnings about discretionary overspending, budget breaches on variable categories, or projected overruns — do NOT flag mandatory expenses here"], ` +
+                `"positives": ["2-3 positive findings about reduced variable spending or good discretionary habits"], ` +
+                `"recommendations": ["3-5 specific, actionable steps to cut DISCRETIONARY spending with exact ${currency} targets — never suggest cutting rent/EMI/mandatory items"], ` +
+                `"fixedInsight": "2-3 sentences specifically about the mandatory expenses: their total, what % of budget they consume, and ONE concrete long-term strategy to reduce the largest fixed cost (e.g. refinance, negotiate, switch plan)", ` +
+                `"score": number 1-100 for overall financial health based on discretionary spending vs discretionary budget}` +
+                ` When splits is present, one recommendation MUST address outstanding balances. ` +
+                ` When projectedDiscretionaryMonthEnd > discretionaryBudget, flag as critical alert. ` +
                 `No markdown, no explanation, ONLY the JSON object.`,
             },
             { role: "user", content: `Spending data:\n${JSON.stringify(data, null, 2)}` },
@@ -416,6 +437,48 @@ export function SpendingReport({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── Mandatory Expenses Card ── */}
+          {fixedExpenses.length > 0 && (
+            <div style={{ ...card, marginBottom: 12, borderLeft: `3px solid ${T.purp}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Mandatory Expenses</div>
+                  <div style={{ fontSize: 11, color: T.sub }}>Fixed commitments — excluded from discretionary analysis</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: T.purp }}>{formatMoney(fixedTotal)}</div>
+                  {monthlyBudgetTotal > 0 && (
+                    <div style={{ fontSize: 10, color: T.sub }}>{Math.round((fixedTotal / monthlyBudgetTotal) * 100)}% of budget</div>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: report?.fixedInsight ? 10 : 0 }}>
+                {fixedExpenses.map((fe, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", borderRadius: 8, background: `${T.purp}10` }}>
+                    <div style={{ fontSize: 13 }}>{fe.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: T.purp }}>{formatMoney(fe.amount)}</div>
+                  </div>
+                ))}
+              </div>
+              {report?.fixedInsight && (
+                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5, borderLeft: `2px solid ${T.purp}`, paddingLeft: 10, marginTop: 2 }}>
+                  {report.fixedInsight}
+                </div>
+              )}
+              {!report?.fixedInsight && (
+                <div style={{ fontSize: 11, color: T.mut, marginTop: 4 }}>
+                  Generate a report to get AI tips on reducing these costs.
+                </div>
+              )}
+            </div>
+          )}
+
+          {fixedExpenses.length > 0 && (
+            <div style={{ fontSize: 11, color: T.sub, background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 8, padding: "7px 12px", marginBottom: 12 }}>
+              Figures below are <strong style={{ color: T.txt }}>discretionary only</strong> — mandatory expenses above are excluded.
             </div>
           )}
 

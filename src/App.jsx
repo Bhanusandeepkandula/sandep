@@ -5433,6 +5433,7 @@ export default function App({ onReady }) {
                 budgets={budgets}
                 catSpent={catSpent}
                 fixedTotal={fixedTotal}
+                fixedExpenses={fixedExpenses}
                 monthlyBudgetTotal={monthlyBudgetTotal}
                 uid={uidRef.current}
                 reportFreq={reportFreq}

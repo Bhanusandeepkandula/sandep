@@ -3259,7 +3259,7 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(104px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(114px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
@@ -7045,14 +7045,18 @@ export default function App({ onReady }) {
                   height: 48,
                   borderRadius: "50%",
                   background: T.acc,
-                  border: `4px solid var(--tabbar-bg, ${T.card})`,
+                  /* Opaque ring matches card surface so it blends with the bar; semi-transparent --tabbar-bg looked like a gap */
+                  border: `4px solid ${T.card}`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
                   transform: "translateY(-14px)",
                   flexShrink: 0,
-                  boxShadow: `0 4px 20px ${T.acc}70`,
+                  position: "relative",
+                  zIndex: 1,
+                  /* Bias accent glow upward so it does not wash the tab bar background */
+                  boxShadow: `0 6px 22px rgba(0,0,0,0.42), 0 -10px 36px ${T.acc}55`,
                 }}
               >
                 <Plus size={22} color={T.btnTxt} strokeWidth={2.5} />

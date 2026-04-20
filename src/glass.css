@@ -24,7 +24,7 @@
   --gsheet:    #12122A;       /* bottom-sheet surface */
   --gdialog:   #1A1A30;       /* alert/confirm surface */
   --gtoast:    #1A1A30;       /* toast surface */
-  --tabbar-bg: rgba(18,18,42,0.92);
+  --tabbar-bg: rgba(18,18,42,0.78);
   --ge:        #20203E;       /* card border */
   --ge-hi:     rgba(255,255,255,0.05);
   --gsh:       var(--glass-shadow-d);
@@ -38,34 +38,34 @@
 /* Per-theme surface tokens (drive .g, .g-sheet, .g-dialog, .g-toast and the tab bar). */
 [data-theme="default"] {
   --gs: #12122A; --gs2: #1A1A30; --gsheet: #12122A; --gdialog: #1A1A30; --gtoast: #1A1A30;
-  --tabbar-bg: rgba(18,18,42,0.92);
+  --tabbar-bg: rgba(18,18,42,0.78);
   --ge: #20203E;
 }
 [data-theme="midnight"] {
   --gs: #0B1220; --gs2: #10182B; --gsheet: #0B1220; --gdialog: #10182B; --gtoast: #10182B;
-  --tabbar-bg: rgba(11,18,32,0.92);
+  --tabbar-bg: rgba(11,18,32,0.78);
   --ge: #162038;
 }
 [data-theme="grey"] {
   --gs: #141414; --gs2: #1C1C1C; --gsheet: #121212; --gdialog: #181818; --gtoast: #181818;
-  --tabbar-bg: rgba(14,14,14,0.94);
+  --tabbar-bg: rgba(14,14,14,0.82);
   --ge: #262626;
 }
 [data-theme="jetblack"] {
   --gs: #0A0A0A; --gs2: #111111; --gsheet: #0A0A0A; --gdialog: #111111; --gtoast: #111111;
-  --tabbar-bg: rgba(8,8,8,0.94);
+  --tabbar-bg: rgba(8,8,8,0.84);
   --ge: #1A1A1A;
 }
 [data-theme="light"] {
   --gs: #FFFFFF; --gs2: #F0F1F5; --gsheet: #FFFFFF; --gdialog: #FFFFFF; --gtoast: #FFFFFF;
-  --tabbar-bg: rgba(255,255,255,0.95);
+  --tabbar-bg: rgba(255,255,255,0.88);
   --ge: #D2D4DC;
   --ge-hi: rgba(255,255,255,0.7);
   --gsh: var(--glass-shadow-l);
 }
 [data-theme="lightblue"] {
   --gs: #FFFFFF; --gs2: #F1F5FC; --gsheet: #FFFFFF; --gdialog: #FFFFFF; --gtoast: #FFFFFF;
-  --tabbar-bg: rgba(255,255,255,0.95);
+  --tabbar-bg: rgba(255,255,255,0.88);
   --ge: #DCE4F3;
   --ge-hi: rgba(255,255,255,0.7);
   --gsh: var(--glass-shadow-l);
@@ -132,23 +132,18 @@
   bottom:     0 !important;
   width:      100% !important;
   margin:     0 !important;
-  padding:    10px 12px env(safe-area-inset-bottom, 0px) !important;
+  /* padding-bottom absorbs the home-indicator safe area; works in both browser and standalone */
+  padding:    10px 12px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
 
   background:              var(--tabbar-bg) !important;
-  backdrop-filter:         blur(32px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  backdrop-filter:         blur(44px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(185%) !important;
+  isolation:               isolate !important;
+
   border:        none !important;
   border-top:    1px solid var(--ge) !important;
   border-radius: 0 !important;
   box-shadow:    0 -6px 24px rgba(0,0,0,0.10) !important;
-}
-
-/* Standalone PWA: push nav bar below safe-area-bottom so it fills the physical gap */
-@media (display-mode: standalone) {
-  .glass-tab-bar {
-    bottom: calc(-1 * env(safe-area-inset-bottom, 34px)) !important;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 34px)) !important;
-  }
 }
 
 /* Scan receipt scan-line animation */

@@ -144,8 +144,22 @@ export function applyTheme(name) {
   document.body.style.background = T.bg;
   document.body.style.color = T.txt;
   document.body.setAttribute("data-theme", T.id || "default");
+  // Root element also carries data-theme so that [data-theme="…"] rules in
+  // glass.css apply even before React paints a child with it. And keep the
+  // boot CSS vars in sync so the splash/shell fallbacks match the active theme.
+  document.documentElement.setAttribute("data-theme", T.id || "default");
+  document.documentElement.style.setProperty("--boot-bg", T.bg);
+  document.documentElement.style.setProperty("--boot-card", T.card);
+  document.documentElement.style.setProperty("--boot-txt", T.txt);
+  document.documentElement.style.setProperty("--boot-sub", T.sub);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute("content", T.bg);
+  // iOS PWA status bar tint: light themes need dark status-bar glyphs.
+  const sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+  if (sb) {
+    const isLight = T.id === "light" || T.id === "lightblue";
+    sb.setAttribute("content", isLight ? "default" : "black-translucent");
+  }
   document.documentElement.style.background = T.card;
   const root = document.getElementById("root");
   if (root) root.style.background = T.bg;

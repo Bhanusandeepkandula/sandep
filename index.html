@@ -13,18 +13,50 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Track</title>
+    <script>
+      /* Paint the html/body/splash with the user's saved theme colour BEFORE
+       * React mounts. Prevents a flash of pure-black on cold load and kills
+       * the "black bar at the bottom" where the PWA's home-indicator zone
+       * would otherwise show through as #000000.
+       * Must stay in sync with THEMES in src/config.js. */
+      (function () {
+        var THEMES = {
+          default:   { bg: "#060610", card: "#12122A", txt: "#F1F1F8", sub: "rgba(235,235,245,0.50)", statusBar: "black-translucent" },
+          midnight:  { bg: "#04070E", card: "#0B1220", txt: "#DEE5F0", sub: "rgba(222,229,240,0.45)", statusBar: "black-translucent" },
+          grey:      { bg: "#070707", card: "#141414", txt: "#E4E4E4", sub: "rgba(228,228,228,0.45)", statusBar: "black-translucent" },
+          jetblack:  { bg: "#000000", card: "#0A0A0A", txt: "#ECECEC", sub: "rgba(236,236,236,0.45)", statusBar: "black-translucent" },
+          light:     { bg: "#F4F5F8", card: "#FFFFFF", txt: "#18182B", sub: "rgba(24,24,43,0.55)",   statusBar: "default" },
+          lightblue: { bg: "#F6F9FF", card: "#FFFFFF", txt: "#0F172A", sub: "rgba(15,23,42,0.55)",   statusBar: "default" }
+        };
+        var id = "default";
+        try { id = localStorage.getItem("track_theme") || "default"; } catch (e) {}
+        var t = THEMES[id] || THEMES.default;
+        var root = document.documentElement;
+        root.style.background = t.card;
+        root.setAttribute("data-theme", id);
+        /* Store on root so inline CSS below can reference it as a CSS var. */
+        root.style.setProperty("--boot-bg", t.bg);
+        root.style.setProperty("--boot-card", t.card);
+        root.style.setProperty("--boot-txt", t.txt);
+        root.style.setProperty("--boot-sub", t.sub);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", t.bg);
+        var sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+        if (sb) sb.setAttribute("content", t.statusBar);
+      })();
+    </script>
     <style>
       /* ── Full-height app shell — body never scrolls ── */
       html {
         -webkit-text-size-adjust: 100%;
-        background: #000000;
+        background: var(--boot-card, #12122A);
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
       }
       body {
         margin: 0;
-        background: #000000;
+        background: var(--boot-bg, #060610);
         height: 100%;
         min-height: 100dvh;
         min-height: -webkit-fill-available;
@@ -49,7 +81,7 @@
         flex-direction: column;
         width: 100%;
         overflow: hidden;
-        background: #000000;
+        background: var(--boot-bg, #060610);
       }
 
       /* ── Native-feel interactions ── */
@@ -126,7 +158,7 @@
         position: fixed;
         inset: 0;
         z-index: 9999;
-        background: #000000;
+        background: var(--boot-bg, #060610);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -176,7 +208,7 @@
         box-shadow: 0 4px 16px rgba(48,209,88,0.35);
       }
       #splash .splash-title {
-        font-size: 24px; font-weight: 800; color: #ffffff;
+        font-size: 24px; font-weight: 800; color: var(--boot-txt, #ffffff);
         letter-spacing: -0.6px;
         font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
         animation: splash-fade-up 0.5s cubic-bezier(0.22,1,0.36,1) 0.18s both;
@@ -184,7 +216,7 @@
       }
       #splash .splash-sub {
         font-size: 14px; font-weight: 500;
-        color: rgba(235,235,245,0.50);
+        color: var(--boot-sub, rgba(235,235,245,0.50));
         letter-spacing: -0.1px;
         font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
         animation: splash-fade-up 0.5s cubic-bezier(0.22,1,0.36,1) 0.28s both;

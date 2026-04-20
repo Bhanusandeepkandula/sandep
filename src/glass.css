@@ -441,6 +441,33 @@
 /* ── Tab bar z-index ── */
 .glass-tab-bar { z-index: 99 !important; }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   HOME-INDICATOR BOTTOM BAND
+   ─────────────────────────────────────────────────────────────────────
+   In standalone PWA mode on iOS, `env(safe-area-inset-bottom)` reserves
+   a ~34pt strip at the bottom for the home indicator. Without a filler
+   there, html/body shows through as a solid "black bar" that visually
+   disconnects the floating glass tab bar from the screen edge.
+
+   This filler paints that strip with the theme's card surface (same
+   tone as the tab-bar glass underlay) so the tab bar reads as part of
+   a cohesive bottom chrome instead of floating above a dead zone.
+
+   Rendered on `body` so it exists on every screen. Sits BELOW the tab
+   bar (z-index 50 < 99) and cannot intercept touches.
+   ═══════════════════════════════════════════════════════════════════════ */
+body::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: env(safe-area-inset-bottom, 0px);
+  background: var(--gs);
+  z-index: 50;
+  pointer-events: none;
+}
+
 /* ── Transaction detail / edit sheet ── must sit above the floating tab bar
    on every platform (iOS Safari can elevate elements with backdrop-filter +
    isolation: isolate into their own painting layer, so we force the overlay

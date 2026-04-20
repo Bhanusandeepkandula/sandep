@@ -440,3 +440,20 @@
 
 /* ── Tab bar z-index ── */
 .glass-tab-bar { z-index: 99 !important; }
+
+/* ── Transaction detail / edit sheet ── must sit above the floating tab bar
+   on every platform (iOS Safari can elevate elements with backdrop-filter +
+   isolation: isolate into their own painting layer, so we force the overlay
+   well above with !important). */
+.tx-detail-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10500 !important;
+}
+
+/* Image preview inside the sheet — above the sheet itself */
+.tx-image-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10600 !important;
+}

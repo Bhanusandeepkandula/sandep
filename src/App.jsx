@@ -3259,7 +3259,7 @@ export default function App({ onReady }) {
     return <AuthGate />;
   }
 
-  const mainBottomPad = "calc(114px + env(safe-area-inset-bottom, 0px))";
+  const mainBottomPad = "calc(90px + env(safe-area-inset-bottom, 0px))";
 
   return (
     <>
@@ -7014,7 +7014,7 @@ export default function App({ onReady }) {
       ) : null}
     </div>
 
-    {/* ── Tab Bar ── */}
+    {/* ── Floating Liquid Glass Tab Bar ── */}
       <div
         className="glass-tab-bar"
         style={{
@@ -7024,7 +7024,7 @@ export default function App({ onReady }) {
           justifyContent: "space-around",
           boxSizing: "border-box",
           zIndex: 99,
-          height: "70px",
+          overflow: "visible",
         }}
       >
         {[
@@ -7041,25 +7041,23 @@ export default function App({ onReady }) {
                 key="add"
                 onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 48,
-                  height: 48,
+                  width: 52,
+                  height: 52,
                   borderRadius: "50%",
                   background: T.acc,
-                  /* Opaque ring matches card surface so it blends with the bar; semi-transparent --tabbar-bg looked like a gap */
-                  border: `4px solid ${T.card}`,
+                  border: "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  transform: "translateY(-14px)",
+                  transform: "translateY(-20px)",
                   flexShrink: 0,
                   position: "relative",
                   zIndex: 1,
-                  /* Bias accent glow upward so it does not wash the tab bar background */
-                  boxShadow: `0 6px 22px rgba(0,0,0,0.42), 0 -10px 36px ${T.acc}55`,
+                  boxShadow: `0 4px 20px ${T.acc}90, 0 0 0 4px ${T.acc}25`,
                 }}
               >
-                <Plus size={22} color={T.btnTxt} strokeWidth={2.5} />
+                <Plus size={24} color={T.btnTxt} strokeWidth={2.6} />
               </button>
             );
           const active = tab === item.id;
@@ -7074,11 +7072,11 @@ export default function App({ onReady }) {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 2,
+                gap: 3,
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                padding: "6px 4px 15px 4px",
+                padding: "6px 4px",
                 minWidth: 0,
               }}
             >

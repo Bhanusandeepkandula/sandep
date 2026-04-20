@@ -23,10 +23,8 @@ import {
   FileText,
   Calendar,
   AlertTriangle,
-  History,
   Target,
   Sparkles,
-  ArrowLeft,
 } from "lucide-react";
 import { T, card } from "./config.js";
 import { CategoryIcon } from "./categoryIcons.jsx";
@@ -45,7 +43,7 @@ function isoStr(d) { return d.toISOString().slice(0, 10); }
 function monthKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-function monthLabel(mk) {
+export function monthLabel(mk) {
   const [y, m] = mk.split("-");
   return new Date(+y, +m - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
@@ -170,7 +168,7 @@ const HISTORY_LS_KEY = "track_spending_reports_v2";
 
 function historyKey(uid) { return `${HISTORY_LS_KEY}_${uid || "anon"}`; }
 
-function loadHistory(uid) {
+export function loadHistory(uid) {
   try {
     const raw = localStorage.getItem(historyKey(uid));
     return raw ? JSON.parse(raw) : {};
@@ -189,7 +187,7 @@ function saveMonthReport(uid, mk, entry) {
   saveHistory(uid, h);
 }
 
-function loadMonthReport(uid, mk) {
+export function loadMonthReport(uid, mk) {
   const h = loadHistory(uid);
   return h[mk] || null;
 }
@@ -238,16 +236,20 @@ export function SpendingReport({
   reportFreq = "monthly",
   px = 20,
   splitAnalytics = null,
+  /** When set (YYYY-MM), render the saved snapshot for that month instead of
+   *  the live current month. Used by the History tab to open past reports. */
+  viewMonthKey = null,
+  /** Hide the section header (used when the parent provides its own title). */
+  hideHeader = false,
 }) {
   const nowRef = useMemo(() => new Date(), []);
   const currentMk = useMemo(() => monthKey(nowRef), [nowRef]);
+  const viewingMk = viewMonthKey || currentMk;
 
   // History: map of mk → { report, snapshot: { txs, fixedExpenses, budgets, monthlyBudgetTotal, currencyCode, analytics } }
   const [history, setHistory] = useState(() => loadHistory(uid));
-  const [viewingMk, setViewingMk] = useState(currentMk);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
-  const [showHistory, setShowHistory] = useState(false);
 
   /* Mandatory/fixed category names — split discretionary from mandatory */
   const fixedCats = useMemo(() => new Set(fixedExpenses.map((f) => f.category).filter(Boolean)), [fixedExpenses]);
@@ -550,133 +552,44 @@ export function SpendingReport({
 
   const scoreColor = report?.score >= 70 ? T.acc : report?.score >= 40 ? T.warn : T.dng;
 
-  // Sorted history months (newest first), excluding current
-  const historyMonths = useMemo(
-    () => Object.keys(history).sort().reverse(),
-    [history]
-  );
-
   return (
     <div style={{ padding: `0 ${px}px 16px` }}>
       {/* Header */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded((p) => !p)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((p) => !p); }}
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: expanded ? 14 : 0, cursor: "pointer" }}
-      >
-        <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
-          <FileText size={17} color={T.purp} /> Spending Report
+      {!hideHeader && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded((p) => !p)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((p) => !p); }}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: expanded ? 14 : 0, cursor: "pointer" }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 700, display: "flex", gap: 8, alignItems: "center" }}>
+            <FileText size={17} color={T.purp} /> Spending Report
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isViewingCurrent && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); generateReport(); }}
+                disabled={loading}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "6px 12px", borderRadius: 8,
+                  border: `1px solid ${T.purp}`, background: `${T.purp}18`,
+                  color: T.purp, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                <RefreshCw size={11} className={loading ? "spin" : ""} />
+                {loading ? "Generating…" : "Refresh"}
+              </button>
+            )}
+            {expanded ? <ChevronUp size={18} color={T.sub} /> : <ChevronDown size={18} color={T.sub} />}
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isViewingCurrent && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); generateReport(); }}
-              disabled={loading}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "6px 12px", borderRadius: 8,
-                border: `1px solid ${T.purp}`, background: `${T.purp}18`,
-                color: T.purp, fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}
-            >
-              <RefreshCw size={11} className={loading ? "spin" : ""} />
-              {loading ? "Generating…" : "Refresh"}
-            </button>
-          )}
-          {expanded ? <ChevronUp size={18} color={T.sub} /> : <ChevronDown size={18} color={T.sub} />}
-        </div>
-      </div>
+      )}
 
       {expanded && (
         <>
-          {/* Viewing banner for historical months */}
-          {!isViewingCurrent && (
-            <div style={{ ...card, marginBottom: 12, display: "flex", alignItems: "center", gap: 10, borderLeft: `3px solid ${T.purp}` }}>
-              <button
-                type="button"
-                onClick={() => setViewingMk(currentMk)}
-                style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.bdr}`, background: T.card2, color: T.txt, fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-              >
-                <ArrowLeft size={12} /> Back
-              </button>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: T.sub }}>Viewing saved report</div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>{thisAnalytics.label}</div>
-              </div>
-              {report?.score != null && (
-                <div style={{ width: 40, height: 40, borderRadius: "50%", border: `2px solid ${scoreColor}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: scoreColor }}>
-                  {report.score}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* History list */}
-          {historyMonths.length > 0 && (
-            <div style={{ ...card, marginBottom: 12 }}>
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => setShowHistory((p) => !p)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setShowHistory((p) => !p); }}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-                  <History size={14} color={T.purp} /> Report History
-                  <span style={{ fontSize: 11, color: T.sub, fontWeight: 500 }}>({historyMonths.length})</span>
-                </div>
-                {showHistory ? <ChevronUp size={16} color={T.sub} /> : <ChevronDown size={16} color={T.sub} />}
-              </div>
-              {showHistory && (
-                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                  {historyMonths.map((mk) => {
-                    const entry = history[mk];
-                    const sc = entry?.report?.score;
-                    const total = entry?.snapshot?.txs
-                      ? entry.snapshot.txs
-                          .filter((t) => (t.date || "").slice(0, 7) === mk && !(fixedCats.has(t.category) || fixedNames.has((t.notes || "").toLowerCase().trim())))
-                          .reduce((s, t) => s + t.amount, 0)
-                      : 0;
-                    const col = sc >= 70 ? T.acc : sc >= 40 ? T.warn : T.dng;
-                    const isActive = mk === viewingMk;
-                    return (
-                      <div
-                        key={mk}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => { setViewingMk(mk); setShowHistory(false); }}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { setViewingMk(mk); setShowHistory(false); } }}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 10,
-                          padding: "8px 10px", borderRadius: 8,
-                          border: `1px solid ${isActive ? T.purp : T.bdr}`,
-                          background: isActive ? `${T.purp}12` : T.card2,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${sc != null ? col : T.bdr}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: sc != null ? col : T.sub, flexShrink: 0 }}>
-                          {sc != null ? sc : "—"}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700 }}>
-                            {monthLabel(mk)} {mk === currentMk ? <span style={{ fontSize: 10, color: T.acc, fontWeight: 600 }}> · current</span> : null}
-                          </div>
-                          <div style={{ fontSize: 11, color: T.sub }}>
-                            {formatMoney(total)} discretionary · generated {entry?.report?.generatedAt ? new Date(entry.report.generatedAt).toLocaleDateString() : "—"}
-                          </div>
-                        </div>
-                        <ChevronDown size={14} color={T.sub} style={{ transform: "rotate(-90deg)" }} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Score + summary */}
           {report?.summary && (
             <div style={{ ...card, marginBottom: 12, display: "flex", gap: 14, alignItems: "flex-start" }}>

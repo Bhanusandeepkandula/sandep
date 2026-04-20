@@ -91,7 +91,7 @@ import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import { CategoryIcon } from "./categoryIcons.jsx";
-import { SpendingReport } from "./SpendingReport.jsx";
+import { SpendingReport, loadHistory as loadReportHistory, loadMonthReport, monthLabel as monthKeyLabel } from "./SpendingReport.jsx";
 import { useDialog } from "./AppDialogs.jsx";
 import { PullToRefresh } from "./PullToRefresh.jsx";
 import {
@@ -371,6 +371,8 @@ export default function App({ onReady }) {
   const [showBM, setShowBM] = useState(false);
   const [budgetSubTab, setBudgetSubTab] = useState("budgets");
   const [reportSubTab, setReportSubTab] = useState("spending");
+  /** When non-null (YYYY-MM), the History sub-tab opens that month's saved report detail view. */
+  const [historyViewMk, setHistoryViewMk] = useState(null);
   /** Header-level display-name editor (bottom-sheet card). */
   const [showNameEdit, setShowNameEdit] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -5430,7 +5432,7 @@ export default function App({ onReady }) {
                   <button
                     key={st.id}
                     type="button"
-                    onClick={() => setReportSubTab(st.id)}
+                    onClick={() => { setReportSubTab(st.id); if (st.id !== "history") setHistoryViewMk(null); }}
                     style={{
                       flex: 1,
                       padding: "10px 8px",
@@ -5552,6 +5554,10 @@ export default function App({ onReady }) {
                 byMonth[mk].txs.push(tx);
                 byMonth[mk].total += effectiveAmount(tx, profileTagUuid, selfFbUid);
               });
+              const savedReports = loadReportHistory(uidRef.current);
+              Object.keys(savedReports || {}).forEach((mk) => {
+                if (!byMonth[mk]) byMonth[mk] = { txs: savedReports[mk]?.snapshot?.txs || [], total: 0 };
+              });
               const history = Object.entries(byMonth)
                 .sort(([a], [b]) => b.localeCompare(a))
                 .map(([mk, data]) => {
@@ -5563,8 +5569,67 @@ export default function App({ onReady }) {
                   const payMap = {};
                   data.txs.forEach((t) => { payMap[t.payment || "Unknown"] = (payMap[t.payment || "Unknown"] || 0) + 1; });
                   const topPay = Object.entries(payMap).sort(([, a], [, b]) => b - a)[0];
-                  return { mk, label, total: data.total, count: data.txs.length, topCat: topCat?.[0] || "", topCatAmount: topCat?.[1] || 0, topPay: topPay?.[0] || "" };
+                  const saved = savedReports?.[mk] || null;
+                  return {
+                    mk,
+                    label,
+                    total: data.total,
+                    count: data.txs.length,
+                    topCat: topCat?.[0] || "",
+                    topCatAmount: topCat?.[1] || 0,
+                    topPay: topPay?.[0] || "",
+                    score: saved?.report?.score ?? null,
+                    generatedAt: saved?.report?.generatedAt || null,
+                    hasSavedReport: !!saved,
+                  };
                 });
+
+              // Detail view for a selected month
+              if (historyViewMk) {
+                const entry = history.find((h) => h.mk === historyViewMk);
+                const savedLabel = entry?.label || monthKeyLabel(historyViewMk);
+                const savedReport = loadMonthReport(uidRef.current, historyViewMk);
+                return (
+                  <div style={{ padding: `0 ${px}px 16px` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryViewMk(null)}
+                        style={{ display: "flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 10, border: `1px solid ${T.bdr}`, background: T.card2, color: T.txt, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                      >
+                        <ArrowLeft size={13} /> Back
+                      </button>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: T.sub }}>Saved report</div>
+                        <div style={{ fontSize: 16, fontWeight: 800 }}>{savedLabel}</div>
+                      </div>
+                      {!savedReport && (
+                        <span style={{ fontSize: 10, color: T.mut, background: T.card2, border: `1px solid ${T.bdr}`, borderRadius: 6, padding: "3px 7px" }}>
+                          No AI report saved
+                        </span>
+                      )}
+                    </div>
+                    <SpendingReport
+                      txs={txs}
+                      categories={categories}
+                      formatMoney={formatMoney}
+                      currencyCode={currencyCode}
+                      budgets={budgets}
+                      catSpent={catSpent}
+                      fixedTotal={fixedTotal}
+                      fixedExpenses={fixedExpenses}
+                      monthlyBudgetTotal={monthlyBudgetTotal}
+                      uid={uidRef.current}
+                      reportFreq={reportFreq}
+                      px={0}
+                      splitAnalytics={splitAnalytics}
+                      viewMonthKey={historyViewMk}
+                      hideHeader
+                    />
+                  </div>
+                );
+              }
+
               return (
                 <div style={{ padding: `0 ${px}px 16px` }}>
                   {history.length === 0 ? (
@@ -5576,15 +5641,31 @@ export default function App({ onReady }) {
                     const prev = history[i + 1];
                     const chg = prev && prev.total > 0 ? ((m.total - prev.total) / prev.total) * 100 : null;
                     const cat = getCat(categories, m.topCat);
+                    const scoreColor = m.score == null ? T.sub : m.score >= 70 ? T.acc : m.score >= 40 ? T.warn : T.dng;
                     return (
-                      <div key={m.mk} style={{ ...card, marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>{m.label}</div>
-                            <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>{m.count} transaction{m.count !== 1 ? "s" : ""}</div>
+                      <div
+                        key={m.mk}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setHistoryViewMk(m.mk)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setHistoryViewMk(m.mk); }}
+                        style={{ ...card, marginBottom: 10, cursor: "pointer", border: `1px solid ${T.bdr}` }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 10 }}>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, minWidth: 0 }}>
+                            <div style={{ width: 44, height: 44, borderRadius: "50%", border: `2px solid ${scoreColor}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: scoreColor, flexShrink: 0 }}>
+                              {m.score != null ? m.score : "—"}
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700 }}>{m.label}</div>
+                              <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>
+                                {m.count} transaction{m.count !== 1 ? "s" : ""}
+                                {m.hasSavedReport && <span style={{ color: T.purp, fontWeight: 600 }}> · AI report saved</span>}
+                              </div>
+                            </div>
                           </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 22, fontWeight: 800 }}>{formatMoney(m.total)}</div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{ fontSize: 18, fontWeight: 800 }}>{formatMoney(m.total)}</div>
                             {chg !== null && (
                               <span style={{ fontSize: 10, fontWeight: 700, color: chg > 0 ? T.dng : T.acc, background: chg > 0 ? T.ddim : T.adim, borderRadius: 5, padding: "2px 7px" }}>
                                 {chg > 0 ? "↑" : "↓"}{Math.abs(Math.round(chg))}% vs prev
@@ -5592,7 +5673,7 @@ export default function App({ onReady }) {
                             )}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {m.topCat && (
                             <span style={{ fontSize: 11, background: `${cat.c}18`, color: cat.c, borderRadius: 6, padding: "3px 9px", display: "inline-flex", alignItems: "center", gap: 4 }}>
                               <CategoryIcon name={m.topCat} size={11} color={cat.c} /> {m.topCat}
@@ -5603,6 +5684,9 @@ export default function App({ onReady }) {
                               {m.topPay}
                             </span>
                           )}
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: T.purp, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                            Open <ChevronRight size={12} />
+                          </span>
                         </div>
                       </div>
                     );

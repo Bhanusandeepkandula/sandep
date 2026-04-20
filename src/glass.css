@@ -133,7 +133,7 @@
   margin: 0 !important;
 
   /* Sit above the home indicator; safe-area-inset-bottom lifts in standalone */
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px) !important;
 
   /* Icon row height + vertical padding */
   padding: 8px 6px !important;

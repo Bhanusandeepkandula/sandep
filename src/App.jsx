@@ -489,6 +489,12 @@ export default function App({ onReady }) {
     (n) => fmt(n, { currency: currencyCode || undefined, locale: locale || undefined }),
     [currencyCode, locale]
   );
+  /** User's active currency symbol (₹, $, €, …). Falls back to the INR symbol
+   *  only when the user hasn't picked a currency yet. */
+  const currencySymbol = useMemo(() => {
+    const cur = CURRENCIES.find((c) => c.code === currencyCode) || CURRENCIES[0];
+    return cur.symbol || "";
+  }, [currencyCode]);
   const formatMoneyRef = useRef(formatMoney);
   useEffect(() => { formatMoneyRef.current = formatMoney; }, [formatMoney]);
   const defaultPaymentRef = useRef("");
@@ -1617,11 +1623,14 @@ export default function App({ onReady }) {
   useEffect(() => {
     if (!payments.length) return;
     if (scanMissingFieldKeys.includes("payment")) return;
-    setForm((f) => ({
-      ...f,
-      payment: payments.includes(f.payment) ? f.payment : payments[0],
-    }));
-  }, [payments, scanMissingFieldKeys]);
+    setForm((f) => {
+      if (payments.includes(f.payment)) return f;
+      const preferred = (defaultPayment && payments.includes(defaultPayment))
+        ? defaultPayment
+        : payments[0];
+      return { ...f, payment: preferred };
+    });
+  }, [payments, scanMissingFieldKeys, defaultPayment]);
 
   /** After save, success UI is at top — scroll so it is not missed below the fold. */
   useEffect(() => {
@@ -2546,7 +2555,7 @@ export default function App({ onReady }) {
       const normalized = normalizeScanResult(rawJson, {
         categoryNames: catNames,
         payments: payNames,
-        defaultPayment: payNames[0] || "",
+        defaultPayment: (defaultPaymentRef.current && payNames.includes(defaultPaymentRef.current)) ? defaultPaymentRef.current : (payNames[0] || ""),
         defaultDate: tdStr(),
       });
 
@@ -2559,7 +2568,7 @@ export default function App({ onReady }) {
         amount: normalized.amount,
         category: mf.includes("category") ? "" : normalized.category,
         date: normalized.date,
-        payment: mf.includes("payment") ? "" : normalized.payment || p.payment || payNames[0] || "",
+        payment: mf.includes("payment") ? "" : normalized.payment || p.payment || (defaultPaymentRef.current && payNames.includes(defaultPaymentRef.current) ? defaultPaymentRef.current : payNames[0] || ""),
         notes: mf.includes("notes") ? "" : normalized.notes || p.notes,
       }));
       let fill = formatMissingScanFieldsMessage(mf);
@@ -4685,7 +4694,7 @@ export default function App({ onReady }) {
                     Amount <span style={{ color: T.dng }}>*</span>
                   </label>
                   <div style={{ position: "relative" }}>
-                    <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.sub, fontWeight: 700, fontSize: 18 }}>₹</span>
+                    <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: T.sub, fontWeight: 700, fontSize: 18 }}>{currencySymbol}</span>
                     <input
                       type="number"
                       inputMode="decimal"
@@ -4693,7 +4702,7 @@ export default function App({ onReady }) {
                       placeholder="0"
                       value={form.amount}
                       onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-                      style={{ ...inp, paddingLeft: 34, fontSize: 22, fontWeight: 800, minHeight: 52 }}
+                      style={{ ...inp, paddingLeft: Math.max(34, 18 + currencySymbol.length * 8), fontSize: 22, fontWeight: 800, minHeight: 52 }}
                     />
                   </div>
                 </div>
@@ -4906,7 +4915,7 @@ export default function App({ onReady }) {
                               <span style={{ fontSize: 12, color: T.sub, width: 60 }}>👤 {p.n}</span>
                               <input
                                 type="number"
-                                placeholder="₹ amount"
+                                placeholder={`${currencySymbol} amount`}
                                 value={p.a}
                                 onChange={(e) => setSplitPpl((prev) => prev.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))}
                                 style={{ ...inp, flex: 1, padding: "8px 10px" }}
@@ -5469,7 +5478,7 @@ export default function App({ onReady }) {
                 fixedExpenses={fixedExpenses}
                 monthlyBudgetTotal={monthlyBudgetTotal}
                 uid={uidRef.current}
-                reportFreq={reportFreq}
+                cycleDay={cycleDay}
                 px={px}
                 splitAnalytics={splitAnalytics}
               />
@@ -5620,7 +5629,7 @@ export default function App({ onReady }) {
                       fixedExpenses={fixedExpenses}
                       monthlyBudgetTotal={monthlyBudgetTotal}
                       uid={uidRef.current}
-                      reportFreq={reportFreq}
+                      cycleDay={cycleDay}
                       px={0}
                       splitAnalytics={splitAnalytics}
                       viewMonthKey={historyViewMk}

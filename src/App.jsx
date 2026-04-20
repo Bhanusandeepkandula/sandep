@@ -3984,9 +3984,8 @@ export default function App({ onReady }) {
                     mode: "statement",
                     Icon: Wallet,
                     title: "Upload Statement",
-                    sub: "Bank or credit card PDF",
+                    sub: "Bank/credit card PDF, Excel, or image — OCR + AI → CSV",
                     col: T.purp,
-                    comingSoon: true,
                   },
                 ].map((opt) => (
                   <div
@@ -4069,7 +4068,7 @@ export default function App({ onReady }) {
               </div>
             )}
             {/* Hidden file inputs — always mounted while tab=add so refs work in any step */}
-            <input ref={stmtRef} type="file" accept="image/*,.pdf,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
+            <input ref={stmtRef} type="file" accept="image/*,.pdf,application/pdf,.xlsx,.xls,.ods,.csv,text/csv,image/heic,image/heif" style={{ display: "none" }} onChange={(e) => void processFile(e, true)} />
             <input ref={csvRef} type="file" accept=".csv,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => processCsvFile(e)} />
             <input ref={ocrCsvImgRef} type="file" accept="image/*,application/pdf,.pdf,.xlsx,.xls,.ods" style={{ display: "none" }} onChange={(e) => void fillOcrFromImageFile(e)} />
 

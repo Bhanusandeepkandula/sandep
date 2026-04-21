@@ -187,6 +187,37 @@ function saveMonthReport(uid, mk, entry) {
   saveHistory(uid, h);
 }
 
+/**
+ * Persist a transaction snapshot for every calendar month that has expenses (and merge
+ * with any existing AI report). Call when opening Report → History so each month row
+ * has saved data without requiring a manual AI run.
+ */
+export function batchPersistMonthSnapshots(uid, txs, fixedExpenses, fixedTotal, monthlyBudgetTotal, budgets, currencyCode) {
+  if (!uid || !Array.isArray(txs)) return;
+  const byMonth = {};
+  for (const tx of txs) {
+    const raw = tx?.date && String(tx.date).trim();
+    if (!raw) continue;
+    const mk = raw.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mk)) continue;
+    if (!byMonth[mk]) byMonth[mk] = [];
+    byMonth[mk].push(tx);
+  }
+  for (const [mk, monthTxs] of Object.entries(byMonth)) {
+    const existing = loadMonthReport(uid, mk) || {};
+    const snapshot = {
+      txs: monthTxs,
+      fixedExpenses: fixedExpenses || [],
+      fixedTotal: fixedTotal ?? 0,
+      monthlyBudgetTotal: monthlyBudgetTotal ?? 0,
+      budgets: { ...(budgets || {}) },
+      currencyCode: currencyCode || "USD",
+      capturedAt: Date.now(),
+    };
+    saveMonthReport(uid, mk, { ...existing, snapshot });
+  }
+}
+
 export function loadMonthReport(uid, mk) {
   const h = loadHistory(uid);
   return h[mk] || null;
@@ -607,8 +638,49 @@ export function SpendingReport({
 
   const scoreColor = report?.score >= 70 ? T.acc : report?.score >= 40 ? T.warn : T.dng;
 
+  const hasOpenAiKey = Boolean(String(import.meta.env.VITE_OPENAI_API_KEY || "").trim());
+
   return (
     <div style={{ padding: `0 ${px}px 16px` }}>
+      {/* History detail: regenerate AI report + score (header is hidden by parent) */}
+      {hideHeader && viewMonthKey && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          {!hasOpenAiKey && (
+            <span style={{ fontSize: 11, color: T.mut, marginRight: "auto" }}>Add VITE_OPENAI_API_KEY to generate scored reports.</span>
+          )}
+          <button
+            type="button"
+            onClick={() => generateReport()}
+            disabled={loading || !hasOpenAiKey}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: `1px solid ${T.purp}`,
+              background: `${T.purp}18`,
+              color: T.purp,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: loading || !hasOpenAiKey ? "not-allowed" : "pointer",
+              opacity: loading || !hasOpenAiKey ? 0.55 : 1,
+            }}
+          >
+            <RefreshCw size={14} className={loading ? "spin" : ""} />
+            {loading ? "Generating…" : "Regenerate report & score"}
+          </button>
+        </div>
+      )}
       {/* Header */}
       {!hideHeader && (
         <div
@@ -1004,7 +1076,9 @@ export function SpendingReport({
               <FileText size={36} color={T.purp} style={{ marginBottom: 10 }} />
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>No Report Yet</div>
               <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
-                Tap "Refresh" to generate your first monthly spending analysis with AI-powered comparisons, tips for next month, and a financial health score.
+                {viewMonthKey && hideHeader
+                  ? "Tap “Regenerate report & score” above to generate this month’s analysis, score, and tips."
+                  : `Tap "Refresh" to generate your first monthly spending analysis with AI-powered comparisons, tips for next month, and a financial health score.`}
               </div>
             </div>
           )}

@@ -82,34 +82,37 @@ async function extractPdf(file, onProgress) {
     throw new Error("Could not load PDF reader. Try uploading as CSV or XLSX instead.");
   }
 
-  // Set up the worker — try module worker first, fall back to legacy .js worker
-  // Empty string = run without a worker thread (synchronous, works on all browsers incl. iOS)
+  const ver = pdfjsLib.version || "";
+  const cdnBase = `https://unpkg.com/pdfjs-dist@${ver}/`;
+  // Needed so CID-encoded / embedded fonts in bank statements decode to real
+  // characters instead of empty strings (especially on iOS Safari / PWA).
+  const docOpts = {
+    data: new Uint8Array(buf),
+    cMapUrl: `${cdnBase}cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${cdnBase}standard_fonts/`,
+    useSystemFonts: true,
+    isEvalSupported: false,
+  };
+
   try {
-    const ver = pdfjsLib.version || "";
-    const base = `https://unpkg.com/pdfjs-dist@${ver}/build/`;
-    // Prefer the .mjs worker; if that fails the error is caught below and we fall back
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}pdf.worker.min.mjs`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${cdnBase}build/pdf.worker.min.mjs`;
   } catch {
-    // ignore — worker will be set up per-document
+    // ignore — retried below
   }
 
   let pdf;
   try {
-    pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-  } catch (workerErr) {
-    // Worker URL may have failed (CORS, CSP, iOS module worker restriction).
-    // Retry with the legacy .js worker.
+    pdf = await pdfjsLib.getDocument(docOpts).promise;
+  } catch {
     try {
-      const ver = pdfjsLib.version || "";
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        `https://unpkg.com/pdfjs-dist@${ver}/build/pdf.worker.min.js`;
-      pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `${cdnBase}build/pdf.worker.min.js`;
+      pdf = await pdfjsLib.getDocument(docOpts).promise;
     } catch {
-      // Last resort: disable the worker entirely (runs synchronously on main thread)
       try {
         pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-        pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf), disableWorker: true }).promise;
-      } catch (finalErr) {
+        pdf = await pdfjsLib.getDocument({ ...docOpts, disableWorker: true }).promise;
+      } catch {
         throw new Error(
           "Could not read this PDF. It may be encrypted or damaged. Try exporting as CSV from your bank app instead."
         );
@@ -133,16 +136,72 @@ async function extractPdf(file, onProgress) {
     } catch {
       // skip pages that fail
     }
-    onProgress?.(i / totalPages);
+    onProgress?.(i / totalPages * 0.5);
   }
 
-  if (pageTexts.length === 0) {
+  if (pageTexts.length > 0) {
+    const full = pageTexts.join("\n---\n").trim();
+    return full.length > 14000 ? full.slice(0, 14000) : full;
+  }
+
+  // Fallback: no embedded text (scanned PDF, or iOS worker quirk that
+  // returns empty items). Rasterize each page and OCR it with Tesseract.
+  try {
+    return await extractPdfViaOcr(pdf, onProgress);
+  } catch (ocrErr) {
     throw new Error(
-      "No text found in this PDF — it may be a scanned image-only PDF. Try exporting as CSV from your bank app, or use 'OCR → CSV' and upload a screenshot instead."
+      "No text could be read from this PDF. If it's a scanned statement, try the 'OCR → CSV' flow with a screenshot, or export the statement as CSV from your bank app."
     );
   }
+}
 
-  const full = pageTexts.join("\n---\n").trim();
+/**
+ * Rasterize each PDF page to a canvas and OCR it. Used when the PDF has no
+ * embedded text layer (scanned statements) or when PDF.js text extraction
+ * silently returns nothing (an iOS Safari / PWA quirk).
+ */
+async function extractPdfViaOcr(pdf, onProgress) {
+  const { extractReceiptTextWithOcr } = await import("./receiptOcr.js");
+  const totalPages = pdf.numPages;
+  // Cap pages we OCR so a 40-page statement doesn't melt the phone.
+  const maxPages = Math.min(totalPages, 6);
+  const out = [];
+
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
+    // Render at ~2x so OCR has enough detail, but clamp width to keep memory sane on mobile.
+    const baseViewport = page.getViewport({ scale: 1 });
+    const targetWidth = Math.min(1600, Math.max(900, baseViewport.width * 2));
+    const scale = targetWidth / baseViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const dataUrl = canvas.toDataURL("image/png");
+
+    try {
+      const pageText = await extractReceiptTextWithOcr(dataUrl, (p) => {
+        onProgress?.(0.5 + ((i - 1 + p) / maxPages) * 0.5);
+      });
+      if (pageText && pageText.trim()) out.push(pageText.trim());
+    } catch {
+      // skip failed pages
+    }
+
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+
+  if (out.length === 0) {
+    throw new Error("OCR returned no text");
+  }
+
+  const full = out.join("\n---\n").trim();
   return full.length > 14000 ? full.slice(0, 14000) : full;
 }
 

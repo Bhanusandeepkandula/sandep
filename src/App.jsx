@@ -92,7 +92,13 @@ import { SheetPortal } from "./SheetPortal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import { CategoryIcon } from "./categoryIcons.jsx";
-import { SpendingReport, loadHistory as loadReportHistory, loadMonthReport, monthLabel as monthKeyLabel } from "./SpendingReport.jsx";
+import {
+  SpendingReport,
+  loadHistory as loadReportHistory,
+  loadMonthReport,
+  monthLabel as monthKeyLabel,
+  batchPersistMonthSnapshots,
+} from "./SpendingReport.jsx";
 import { useDialog } from "./AppDialogs.jsx";
 import { PullToRefresh } from "./PullToRefresh.jsx";
 import {
@@ -374,6 +380,10 @@ export default function App({ onReady }) {
   const [reportSubTab, setReportSubTab] = useState("spending");
   /** When non-null (YYYY-MM), the History sub-tab opens that month's saved report detail view. */
   const [historyViewMk, setHistoryViewMk] = useState(null);
+  /** Bumps after batch snapshot write so Report → History re-reads localStorage. */
+  const [reportHistoryRefreshKey, setReportHistoryRefreshKey] = useState(0);
+  /** Home "Recent" list: null = current month / billing period (matches top card); YYYY-MM = that calendar month. */
+  const [homeRecentMonthKey, setHomeRecentMonthKey] = useState(null);
   /** Header-level display-name editor (bottom-sheet card). */
   const [showNameEdit, setShowNameEdit] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -423,6 +433,11 @@ export default function App({ onReady }) {
   const layout = useShellLayout();
   const { maxShell, w: vw, px, twoCol, comfortable, chart, safeBottom, safeTop, isMobile } = layout;
   const uidRef = useRef(null);
+  /** Latest txs for effects that intentionally avoid depending on `txs` identity (Firestore churn). */
+  const txsRef = useRef(txs);
+  useEffect(() => {
+    txsRef.current = txs;
+  }, [txs]);
   const catalogRef = useRef(catalog);
 
   const effectiveCatalog = useMemo(() => {
@@ -1675,6 +1690,25 @@ export default function App({ onReady }) {
     return filterTx(txs, "month");
   }, [txs, cycleRange]);
   const monthTotal = useMemo(() => tot(monthTxs, profileTagUuid, selfFbUid), [monthTxs, profileTagUuid, selfFbUid]);
+
+  const homeMonthPickerOptions = useMemo(() => {
+    const s = new Set();
+    for (const t of txs) {
+      const mk = (t.date || "").slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(mk)) s.add(mk);
+    }
+    return [...s].sort((a, b) => b.localeCompare(a));
+  }, [txs]);
+
+  const homeRecentTxs = useMemo(() => {
+    if (homeRecentMonthKey == null) return monthTxs;
+    return txs.filter((t) => (t.date || "").slice(0, 7) === homeRecentMonthKey);
+  }, [txs, monthTxs, homeRecentMonthKey]);
+
+  const homeRecentTotal = useMemo(
+    () => tot(homeRecentTxs, profileTagUuid, selfFbUid),
+    [homeRecentTxs, profileTagUuid, selfFbUid]
+  );
   const todayTxs = useMemo(() => txs.filter((t) => t.date === tdStr()), [txs]);
   const todayTotal = useMemo(() => tot(todayTxs, profileTagUuid, selfFbUid), [todayTxs, profileTagUuid, selfFbUid]);
   const weekTxs = useMemo(() => filterTx(txs, "week"), [txs]);
@@ -3125,6 +3159,19 @@ export default function App({ onReady }) {
 
   const fixedTotal = fixedExpenses.reduce((s, f) => s + (f.amount || 0), 0);
 
+  /** When Report → History list is open, persist per-month transaction snapshots so each row has saved data (merge-safe with AI reports). */
+  useEffect(() => {
+    if (tab !== "reports" || reportSubTab !== "history" || historyViewMk) return;
+    const uid = uidRef.current;
+    if (!uid || txs.length === 0) return;
+    const id = setTimeout(() => {
+      batchPersistMonthSnapshots(uid, txsRef.current, fixedExpenses, fixedTotal, monthlyBudgetTotal, budgets, currencyCode);
+      setReportHistoryRefreshKey((k) => k + 1);
+    }, 600);
+    return () => clearTimeout(id);
+    // Intentionally omit `txs` reference equality — use length + refresh to avoid snapshot loops.
+  }, [tab, reportSubTab, historyViewMk, txs.length, fixedExpenses, fixedTotal, monthlyBudgetTotal, budgets, currencyCode]);
+
   async function saveTheme(themeId) {
     setUserTheme(themeId);
     try { localStorage.setItem("track_theme", themeId); } catch {}
@@ -3535,7 +3582,7 @@ export default function App({ onReady }) {
               );
             })()}
 
-            {expenseCountOutsideThisCalendarMonth > 0 && monthTotal === 0 && txs.length > 0 ? (
+            {!homeRecentMonthKey && expenseCountOutsideThisCalendarMonth > 0 && monthTotal === 0 && txs.length > 0 ? (
               <div
                 style={{
                   margin: `0 ${px}px 12px`,
@@ -3654,22 +3701,45 @@ export default function App({ onReady }) {
             )}
 
             {(() => {
-              const dayOfMonth = new Date().getDate();
-              const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
-              const metrics = [
-                {
-                  label: "Today",
-                  val: formatMoney(todayTotal),
-                  sub: todayTxs.length === 1 ? "1 transaction" : `${todayTxs.length} transactions`,
-                  accent: T.acc,
-                },
-                {
-                  label: "Avg / Day",
-                  val: formatMoney(avgDay),
-                  sub: `over ${dayOfMonth} day${dayOfMonth !== 1 ? "s" : ""}`,
-                  accent: T.grn || "#22c55e",
-                },
-              ];
+              const pastMk = homeRecentMonthKey;
+              let metrics;
+              if (pastMk) {
+                const [y, m] = pastMk.split("-").map(Number);
+                const label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+                const daysIn = new Date(y, m, 0).getDate();
+                const avgDay = daysIn > 0 ? homeRecentTotal / daysIn : 0;
+                metrics = [
+                  {
+                    label,
+                    val: formatMoney(homeRecentTotal),
+                    sub: homeRecentTxs.length === 1 ? "1 transaction" : `${homeRecentTxs.length} transactions`,
+                    accent: T.acc,
+                  },
+                  {
+                    label: "Avg / day",
+                    val: formatMoney(avgDay),
+                    sub: `${daysIn} days in month`,
+                    accent: T.grn || "#22c55e",
+                  },
+                ];
+              } else {
+                const dayOfMonth = new Date().getDate();
+                const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
+                metrics = [
+                  {
+                    label: "Today",
+                    val: formatMoney(todayTotal),
+                    sub: todayTxs.length === 1 ? "1 transaction" : `${todayTxs.length} transactions`,
+                    accent: T.acc,
+                  },
+                  {
+                    label: "Avg / Day",
+                    val: formatMoney(avgDay),
+                    sub: `over ${dayOfMonth} day${dayOfMonth !== 1 ? "s" : ""}`,
+                    accent: T.grn || "#22c55e",
+                  },
+                ];
+              }
               return (
                 <div
                   style={{
@@ -3703,7 +3773,7 @@ export default function App({ onReady }) {
               );
             })()}
 
-            {Object.entries(budgets)
+            {!homeRecentMonthKey && Object.entries(budgets)
               .filter(([c, l]) => c !== MONTH_TOTAL_BUDGET_KEY && (catSpent[c] || 0) >= l * 0.8)
               .slice(0, 2)
               .map(([c, l]) => {
@@ -3738,25 +3808,72 @@ export default function App({ onReady }) {
               })}
 
             <div style={{ padding: `0 ${px}px` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.8px" }}>Recent</div>
-                <button type="button" onClick={() => setTab("analytics")} style={{ background: "none", border: "none", color: T.acc, fontSize: 12, cursor: "pointer", fontWeight: 700, letterSpacing: "0.2px" }}>
-                  See all →
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
+                  <label htmlFor="home-month-filter" style={{ fontSize: 12, color: T.sub, fontWeight: 600 }}>
+                    Month
+                  </label>
+                  <select
+                    id="home-month-filter"
+                    value={homeRecentMonthKey ?? ""}
+                    onChange={(e) => setHomeRecentMonthKey(e.target.value ? e.target.value : null)}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: T.txt,
+                      background: T.card2,
+                      border: `1px solid ${T.bdr}`,
+                      borderRadius: 10,
+                      padding: "8px 10px",
+                      maxWidth: "min(220px, 100%)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="">{cycleRange ? "This billing period" : "This month"}</option>
+                    {homeMonthPickerOptions.map((mk) => (
+                      <option key={mk} value={mk}>
+                        {monthKeyLabel(mk)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setTab("analytics")}
+                    style={{ background: "none", border: "none", color: T.acc, fontSize: 12, cursor: "pointer", fontWeight: 700, letterSpacing: "0.2px" }}
+                  >
+                    See all →
+                  </button>
+                </div>
               </div>
-              {txs.slice(0, 100).map((tx) => (
-                <TxRow
-                  key={tx.id}
-                  tx={tx}
-                  onDelete={delTx}
-                  onSelect={setSelectedTx}
-                  categories={categories}
-                  formatMoney={formatMoney}
-                  dateLocale={dateLocale || locale}
-                  selfProfileUuid={profileTagUuid || ""}
-                  selfFbUid={selfFbUid}
-                />
-              ))}
+              {homeRecentTxs.length === 0 ? (
+                <div style={{ fontSize: 13, color: T.sub, textAlign: "center", padding: "28px 12px", lineHeight: 1.5 }}>
+                  No expenses in {homeRecentMonthKey ? monthKeyLabel(homeRecentMonthKey) : cycleRange ? "this billing period" : "this calendar month"}.
+                </div>
+              ) : (
+                homeRecentTxs.slice(0, 100).map((tx) => (
+                  <TxRow
+                    key={tx.id}
+                    tx={tx}
+                    onDelete={delTx}
+                    onSelect={setSelectedTx}
+                    categories={categories}
+                    formatMoney={formatMoney}
+                    dateLocale={dateLocale || locale}
+                    selfProfileUuid={profileTagUuid || ""}
+                    selfFbUid={selfFbUid}
+                  />
+                ))
+              )}
             </div>
           </div>
         )}
@@ -5622,6 +5739,7 @@ export default function App({ onReady }) {
             )}
 
             {reportSubTab === "history" && (() => {
+              void reportHistoryRefreshKey;
               const byMonth = {};
               txs.forEach((tx) => {
                 const d = new Date((tx.date || "") + "T00:00:00");
@@ -5647,6 +5765,8 @@ export default function App({ onReady }) {
                   data.txs.forEach((t) => { payMap[t.payment || "Unknown"] = (payMap[t.payment || "Unknown"] || 0) + 1; });
                   const topPay = Object.entries(payMap).sort(([, a], [, b]) => b - a)[0];
                   const saved = savedReports?.[mk] || null;
+                  const hasAiReport = !!(saved?.report && (saved.report.summary || saved.report.score != null));
+                  const hasSnapshot = !!(saved?.snapshot?.txs?.length);
                   return {
                     mk,
                     label,
@@ -5657,7 +5777,8 @@ export default function App({ onReady }) {
                     topPay: topPay?.[0] || "",
                     score: saved?.report?.score ?? null,
                     generatedAt: saved?.report?.generatedAt || null,
-                    hasSavedReport: !!saved,
+                    hasAiReport,
+                    hasSnapshot,
                   };
                 });
 
@@ -5737,7 +5858,8 @@ export default function App({ onReady }) {
                               <div style={{ fontSize: 14, fontWeight: 700 }}>{m.label}</div>
                               <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>
                                 {m.count} transaction{m.count !== 1 ? "s" : ""}
-                                {m.hasSavedReport && <span style={{ color: T.purp, fontWeight: 600 }}> · AI report saved</span>}
+                                {m.hasSnapshot && <span style={{ color: T.sub, fontWeight: 600 }}> · Data saved</span>}
+                                {m.hasAiReport && <span style={{ color: T.purp, fontWeight: 600 }}> · AI report & score</span>}
                               </div>
                             </div>
                           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { T } from "./config.js";
 import { X } from "lucide-react";
+import { SheetPortal } from "./SheetPortal.jsx";
 
 /**
  * Camera QR scan + paste fallback for split-contact payloads.
@@ -70,6 +71,7 @@ export function SplitQrScanModal({ open, onClose, onDecoded }) {
   if (!open) return null;
 
   return (
+    <SheetPortal>
     <div
       role="dialog"
       aria-modal="true"
@@ -179,5 +181,6 @@ export function SplitQrScanModal({ open, onClose, onDecoded }) {
         </button>
       </div>
     </div>
+    </SheetPortal>
   );
 }

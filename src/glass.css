@@ -133,10 +133,10 @@
   margin: 0 !important;
 
   /* Sit above the home indicator; safe-area-inset-bottom lifts in standalone */
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 2px) !important;
 
-  /* Icon row height + vertical padding */
-  padding: 8px 6px !important;
+  /* Icon row height + vertical padding (~10% shorter than before) */
+  padding: 5px 6px !important;
 
   /* Liquid glass material */
   background:              var(--tabbar-bg) !important;
@@ -468,19 +468,6 @@ body::after {
   pointer-events: none;
 }
 
-/* ── Transaction detail / edit sheet ── must sit above the floating tab bar
-   on every platform (iOS Safari can elevate elements with backdrop-filter +
-   isolation: isolate into their own painting layer, so we force the overlay
-   well above with !important). */
-.tx-detail-overlay {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 10500 !important;
-}
-
-/* Image preview inside the sheet — above the sheet itself */
-.tx-image-overlay {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 10600 !important;
-}
+/* Sheets / modals now mount into `document.body` via <SheetPortal>, so
+   their inline z-index values rise above the floating tab bar without
+   needing !important overrides here. */

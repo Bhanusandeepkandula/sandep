@@ -5,6 +5,7 @@ import { T, inp, pill } from "./config.js";
 import { getCat, fDate } from "./utils.js";
 import { CategoryIcon } from "./categoryIcons.jsx";
 import { normalizePerson, personStableKey } from "./splitContactShare.js";
+import { SheetPortal } from "./SheetPortal.jsx";
 
 export function TxDetail({
   tx,
@@ -252,8 +253,8 @@ export function TxDetail({
   ) : null;
 
   return (
-    <>
-    <div onClick={onClose} className="tx-detail-overlay" style={{ background: "rgba(0,0,0,0.65)", display: "flex", flexDirection: "column", justifyContent: "flex-end", animation: "fade-in .2s ease" }}>
+    <SheetPortal>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 10500, background: "rgba(0,0,0,0.65)", display: "flex", flexDirection: "column", justifyContent: "flex-end", animation: "fade-in .2s ease" }}>
       <div className="g-sheet" onClick={(e) => e.stopPropagation()} style={{ borderRadius: "28px 28px 0 0", maxHeight: "92vh", overflowY: "auto", WebkitOverflowScrolling: "touch", animation: "ios-sheet-up .42s cubic-bezier(.22,1,.36,1)" }}>
         {/* Handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}>
@@ -1029,15 +1030,14 @@ export function TxDetail({
       </div>
     </div>
 
-    {/* Full-screen receipt viewer */}
     {imgOpen && tx.receiptUrl && (
-      <div onClick={() => setImgOpen(false)} className="tx-image-overlay" style={{ background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", animation: "fade-in .2s ease" }}>
+      <div onClick={() => setImgOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10600, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", animation: "fade-in .2s ease" }}>
         <button type="button" onClick={() => setImgOpen(false)} style={{ position: "absolute", top: 16, right: 16, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 999, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <X size={20} color="#fff" />
         </button>
         <img src={tx.receiptUrl} alt="Receipt" style={{ maxWidth: "94vw", maxHeight: "90vh", borderRadius: 12, objectFit: "contain" }} />
       </div>
     )}
-    </>
+    </SheetPortal>
   );
 }

@@ -88,6 +88,7 @@ import { canRunBrowserOcr, extractReceiptTextWithOcr } from "./receiptOcr.js";
 import { extractTextFromFile, fileToDataUrl } from "./docExtract.js";
 import { TxDetail } from "./TxDetail.jsx";
 import { SplitQrScanModal } from "./SplitQrScanModal.jsx";
+import { SheetPortal } from "./SheetPortal.jsx";
 import { OcrCsvVoiceControls } from "./OcrCsvVoiceControls.jsx";
 import { HomeSkeleton, AnalyticsSkeleton, BudgetsSkeleton } from "./SkeletonBones.jsx";
 import { CategoryIcon } from "./categoryIcons.jsx";
@@ -3968,6 +3969,34 @@ export default function App({ onReady }) {
               {step === "mode" && (
               <div style={{ padding: `0 ${px}px` }}>
                 <div style={{ fontSize: 13, color: T.sub, marginBottom: 18 }}>Choose how to add your expense</div>
+                {scanErr ? (
+                  <div
+                    role="alert"
+                    style={{
+                      background: T.ddim,
+                      border: `1px solid ${T.dng}59`,
+                      borderRadius: T.r,
+                      padding: "10px 14px",
+                      marginBottom: 16,
+                      fontSize: 13,
+                      color: T.dng,
+                      lineHeight: 1.45,
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 10,
+                    }}
+                  >
+                    <span style={{ flex: 1 }}>{scanErr}</span>
+                    <button
+                      type="button"
+                      onClick={() => setScanErr("")}
+                      aria-label="Dismiss error"
+                      style={{ background: "transparent", border: "none", color: T.dng, cursor: "pointer", padding: 0, display: "inline-flex", flexShrink: 0 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : null}
                 {[
                   { mode: "manual", Icon: Pencil, title: "Manual Entry", sub: "Type in amount & details", col: T.acc },
                   {
@@ -4006,13 +4035,13 @@ export default function App({ onReady }) {
                     onClick={() => {
                       if (opt.comingSoon) return;
                       setAddMode(opt.mode);
+                      setScanErr("");
                       if (opt.mode === "manual") setStep("form");
                       else if (opt.mode === "import") csvRef.current?.click();
                       else if (opt.mode === "ocrCsv") {
                         setOcrCsvErr("");
                         setStep("ocrCsv");
                       } else if (opt.mode === "image") {
-                        setScanErr("");
                         setStep("scanSource");
                       }
                       else stmtRef.current?.click();
@@ -4021,15 +4050,15 @@ export default function App({ onReady }) {
                       if (opt.comingSoon) return;
                       if (e.key === "Enter" || e.key === " ") {
                         setAddMode(opt.mode);
+                        setScanErr("");
                         if (opt.mode === "manual") setStep("form");
                         else if (opt.mode === "import") csvRef.current?.click();
                         else if (opt.mode === "ocrCsv") {
                           setOcrCsvErr("");
                           setStep("ocrCsv");
                         } else if (opt.mode === "image") {
-                        setScanErr("");
-                        setStep("scanSource");
-                      }
+                          setStep("scanSource");
+                        }
                         else stmtRef.current?.click();
                       }
                     }}
@@ -4045,8 +4074,21 @@ export default function App({ onReady }) {
                       transition: "border-color .15s, opacity .15s",
                     }}
                   >
-                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${opt.col}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <opt.Icon size={22} color={opt.col} strokeWidth={1.8} />
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 12,
+                        background: `linear-gradient(135deg, ${opt.col}3d, ${opt.col}12)`,
+                        border: `1px solid ${opt.col}33`,
+                        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${opt.col}1f`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <opt.Icon size={22} color={opt.col} strokeWidth={2} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -4092,7 +4134,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid ${T.dng}59",
+                      border: `1px solid ${T.dng}59`,
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 16,
@@ -4121,8 +4163,21 @@ export default function App({ onReady }) {
                     color: "inherit",
                   }}
                 >
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${T.blue}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Camera size={22} color={T.blue} strokeWidth={1.8} />
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      background: `linear-gradient(135deg, ${T.blue}3d, ${T.blue}12)`,
+                      border: `1px solid ${T.blue}33`,
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${T.blue}1f`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Camera size={22} color={T.blue} strokeWidth={2} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Take photo</div>
@@ -4146,8 +4201,21 @@ export default function App({ onReady }) {
                     color: "inherit",
                   }}
                 >
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${T.acc}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <ImageIcon size={22} color={T.acc} strokeWidth={1.8} />
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      background: `linear-gradient(135deg, ${T.acc}3d, ${T.acc}12)`,
+                      border: `1px solid ${T.acc}33`,
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${T.acc}1f`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ImageIcon size={22} color={T.acc} strokeWidth={2} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Choose one photo</div>
@@ -4403,7 +4471,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid ${T.dng}59",
+                      border: `1px solid ${T.dng}59`,
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 14,
@@ -4676,7 +4744,7 @@ export default function App({ onReady }) {
                   <div
                     style={{
                       background: T.ddim,
-                      border: "1px solid ${T.dng}59",
+                      border: `1px solid ${T.dng}59`,
                       borderRadius: T.r,
                       padding: "10px 14px",
                       marginBottom: 14,
@@ -6331,6 +6399,7 @@ export default function App({ onReady }) {
       </div>
 
       {showNameEdit ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -6455,9 +6524,11 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
 
       {showBM ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -6565,9 +6636,11 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
 
       {showFixedModal ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -6713,9 +6786,11 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
 
       {showCurrencyPicker && (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -6779,11 +6854,13 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       )}
 
       <SplitQrScanModal open={showSplitScan} onClose={() => setShowSplitScan(false)} onDecoded={(t) => void handleSplitContactDecoded(t)} />
 
       {showProfileQr && firebaseUser?.email ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -6938,9 +7015,11 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
 
       {deleteAllModal ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -7046,9 +7125,11 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
 
       {deleteAcctModal ? (
+        <SheetPortal>
         <div
           role="dialog"
           aria-modal="true"
@@ -7103,6 +7184,7 @@ export default function App({ onReady }) {
             </div>
           </div>
         </div>
+        </SheetPortal>
       ) : null}
     </div>
 

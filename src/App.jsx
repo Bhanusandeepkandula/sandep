@@ -3503,62 +3503,47 @@ export default function App({ onReady }) {
               const spentFrac = monthBudgetRing
                 ? Math.max(0, Math.min(1, 1 - monthBudgetRing.remainingFrac))
                 : 0;
+              const dayOfMonth = new Date().getDate();
+              const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
               return (
-                <div
-                  style={{
-                    margin: `0 ${px}px 14px`,
-                    background: T.card,
-                    border: `1px solid ${T.bdr}`,
-                    borderRadius: T.rLg,
-                    padding: 20,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 14 }}>
+                <div className="track-summary" style={{ margin: `0 ${px}px 16px` }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
                     <div
                       style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
                       onClick={() => { setTab("analytics"); setDf("month"); }}
                     >
-                      <div style={{ fontSize: 12, color: T.sub, marginBottom: 4, fontWeight: 600, letterSpacing: 0.2, textTransform: "uppercase" }}>This Month</div>
-                      <div className="stat-display" style={{ fontSize: 40, lineHeight: 1.0, color: T.txt }}>{formatMoney(monthTotal)}</div>
+                      <p className="track-label" style={{ color: T.sub, margin: 0 }}>{calendarMonthLabel}</p>
+                      <p className="stat-display track-summary__amount" style={{ color: T.txt, margin: "4px 0 0" }}>
+                        {formatMoney(monthTotal)}
+                      </p>
                       {monthBudgetRing && (
-                        <div style={{ fontSize: 12, color: T.sub, marginTop: 8 }}>
-                          of <span style={{ color: T.txt, fontWeight: 700 }}>{formatMoney(monthBudgetRing.cap)}</span> budget
-                        </div>
+                        <p style={{ fontSize: 12, color: T.sub, marginTop: 6, marginBottom: 0 }}>
+                          of <span style={{ color: T.txt, fontWeight: 600 }}>{formatMoney(monthBudgetRing.cap)}</span> budget
+                        </p>
                       )}
                     </div>
                     {monthBudgetRing ? (
                       <button
                         type="button"
+                        className="track-summary__budget-chip"
                         onClick={() => setTab("budgets")}
-                        title="Monthly spending cap — tap to edit in Budgets"
+                        title="Monthly spending cap — open Budgets"
                         aria-label="Monthly budget status, open Budgets"
                         style={{
                           flexShrink: 0,
-                          minWidth: 68,
-                          padding: "8px 12px",
-                          borderRadius: 12,
-                          border: `1px solid ${barColor}44`,
+                          borderColor: `${barColor}55`,
                           background: monthBudgetRing.over ? T.ddim : monthBudgetRing.remainingFrac <= 0.2 ? T.wdim : T.adim,
                           color: barColor,
-                          cursor: "pointer",
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 2,
                         }}
                       >
                         {monthBudgetRing.over ? (
                           <>
-                            <div style={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Over</div>
-                            <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.1, letterSpacing: "-0.3px", marginTop: 2 }}>{formatMoney(monthBudgetRing.spent - monthBudgetRing.cap)}</div>
+                            <div>Over by</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2 }}>{formatMoney(monthBudgetRing.spent - monthBudgetRing.cap)}</div>
                           </>
                         ) : (
                           <>
-                            <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.3px" }}>
-                              {formatMoney(monthBudgetRing.cap - monthBudgetRing.spent)}
-                            </div>
-                            <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>left</div>
+                            <div>{formatMoney(monthBudgetRing.cap - monthBudgetRing.spent)} left</div>
                           </>
                         )}
                       </button>
@@ -3566,16 +3551,36 @@ export default function App({ onReady }) {
                   </div>
 
                   {monthBudgetRing && (
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ height: 5, background: T.bdr, borderRadius: 999, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${Math.round(spentFrac * 100)}%`, background: barColor, borderRadius: 999, transition: "width .6s ease" }} />
-                      </div>
+                    <div className="track-progress">
+                      <div
+                        className="track-progress__fill"
+                        style={{ width: `${Math.round(spentFrac * 100)}%`, background: barColor }}
+                      />
                     </div>
                   )}
 
                   {!monthBudgetRing && (
-                    <div style={{ fontSize: 11, color: T.mut, marginTop: 10, lineHeight: 1.4 }}>
-                      Only spending dated in {calendarMonthLabel}. Set a monthly cap in Budgets to track % used.
+                    <p style={{ fontSize: 12, color: T.sub, marginTop: 12, marginBottom: 0, lineHeight: 1.45 }}>
+                      Spending dated in {calendarMonthLabel}. Set a monthly cap in Budgets to track usage.
+                    </p>
+                  )}
+
+                  {!homeRecentMonthKey && (
+                    <div className="track-stat-strip">
+                      <div className="track-stat-strip__item">
+                        <div className="track-stat-strip__label" style={{ color: T.sub }}>Today</div>
+                        <div className="track-stat-strip__value" style={{ color: T.txt }}>{formatMoney(todayTotal)}</div>
+                        <div className="track-stat-strip__sub" style={{ color: T.sub }}>
+                          {todayTxs.length === 1 ? "1 transaction" : `${todayTxs.length} transactions`}
+                        </div>
+                      </div>
+                      <div className="track-stat-strip__item">
+                        <div className="track-stat-strip__label" style={{ color: T.sub }}>Avg per day</div>
+                        <div className="track-stat-strip__value" style={{ color: T.txt }}>{formatMoney(avgDay)}</div>
+                        <div className="track-stat-strip__sub" style={{ color: T.sub }}>
+                          {dayOfMonth} day{dayOfMonth !== 1 ? "s" : ""} elapsed
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3626,6 +3631,7 @@ export default function App({ onReady }) {
               <div
                 role="button"
                 tabIndex={0}
+                className="track-callout track-callout--warn"
                 onClick={() => {
                   setTab("add");
                   setStep("mode");
@@ -3638,33 +3644,27 @@ export default function App({ onReady }) {
                 }}
                 style={{
                   margin: `0 ${px}px 14px`,
-                  background: T.wdim,
-                  border: `1px solid ${T.warn}4D`,
-                  borderRadius: T.r,
-                  padding: "12px 16px",
+                  borderColor: `${T.warn}44`,
                   display: "flex",
                   alignItems: "center",
                   gap: 12,
                   cursor: "pointer",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}><ClipboardList size={26} color={T.warn} /></div>
+                <ClipboardList size={22} color={T.warn} strokeWidth={2} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.warn }}>Daily Expense Log Pending</div>
-                  <div style={{ fontSize: 12, color: T.sub, marginTop: 1 }}>No entries today — tap to log now</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.warn }}>Nothing logged today</div>
+                  <div style={{ fontSize: 12, color: T.sub, marginTop: 2 }}>Add an expense to keep your log current</div>
                 </div>
-                <span style={{ color: T.warn, fontSize: 20, fontWeight: 300 }}>›</span>
+                <ChevronRight size={18} color={T.warn} />
               </div>
             )}
 
             {showHomeAiTipBanner && tips[0] && (
               <div
+                className="track-callout track-callout--insight"
                 style={{
                   margin: `0 ${px}px 14px`,
-                  background: T.adim,
-                  border: "1px solid rgba(34,197,94,0.22)",
-                  borderRadius: T.r,
-                  padding: "12px 16px",
                   position: "relative",
                   paddingRight: 40,
                 }}
@@ -3677,11 +3677,11 @@ export default function App({ onReady }) {
                     position: "absolute",
                     top: 8,
                     right: 8,
-                    width: 30,
-                    height: 30,
+                    width: 28,
+                    height: 28,
                     border: "none",
-                    borderRadius: T.r,
-                    background: T.id === "light" ? "rgba(0,0,0,0.06)" : "rgba(0,0,0,0.2)",
+                    borderRadius: 8,
+                    background: T.card2,
                     color: T.sub,
                     cursor: "pointer",
                     display: "flex",
@@ -3690,85 +3690,44 @@ export default function App({ onReady }) {
                     padding: 0,
                   }}
                 >
-                  <X size={16} strokeWidth={2.5} />
+                  <X size={14} strokeWidth={2.5} />
                 </button>
-                <div style={{ fontSize: 11, color: T.acc, fontWeight: 700, marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>
-                  <Sparkles size={11} /> AI INSIGHT
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{tips[0].title}</div>
-                <div style={{ fontSize: 12, color: T.sub }}>{tips[0].desc}</div>
+                <div style={{ fontSize: 12, color: T.acc, fontWeight: 600, marginBottom: 4 }}>Spending note</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{tips[0].title}</div>
+                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.45 }}>{tips[0].desc}</div>
               </div>
             )}
 
-            {(() => {
-              const pastMk = homeRecentMonthKey;
-              let metrics;
-              if (pastMk) {
-                const [y, m] = pastMk.split("-").map(Number);
-                const label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" });
-                const daysIn = new Date(y, m, 0).getDate();
-                const avgDay = daysIn > 0 ? homeRecentTotal / daysIn : 0;
-                metrics = [
-                  {
-                    label,
-                    val: formatMoney(homeRecentTotal),
-                    sub: homeRecentTxs.length === 1 ? "1 transaction" : `${homeRecentTxs.length} transactions`,
-                    accent: T.acc,
-                  },
-                  {
-                    label: "Avg / day",
-                    val: formatMoney(avgDay),
-                    sub: `${daysIn} days in month`,
-                    accent: T.grn || "#22c55e",
-                  },
-                ];
-              } else {
-                const dayOfMonth = new Date().getDate();
-                const avgDay = dayOfMonth > 0 ? monthTotal / dayOfMonth : 0;
-                metrics = [
-                  {
-                    label: "Today",
-                    val: formatMoney(todayTotal),
-                    sub: todayTxs.length === 1 ? "1 transaction" : `${todayTxs.length} transactions`,
-                    accent: T.acc,
-                  },
-                  {
-                    label: "Avg / Day",
-                    val: formatMoney(avgDay),
-                    sub: `over ${dayOfMonth} day${dayOfMonth !== 1 ? "s" : ""}`,
-                    accent: T.grn || "#22c55e",
-                  },
-                ];
-              }
+            {homeRecentMonthKey && (() => {
+              const [y, m] = homeRecentMonthKey.split("-").map(Number);
+              const daysIn = new Date(y, m, 0).getDate();
+              const avgDay = daysIn > 0 ? homeRecentTotal / daysIn : 0;
               return (
                 <div
+                  className="track-stat-strip"
                   style={{
-                    margin: `0 ${px}px 14px`,
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 10,
+                    margin: `0 ${px}px 12px`,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: `1px solid ${T.bdr}`,
+                    background: T.card,
+                    marginTop: 0,
+                    paddingTop: 12,
+                    borderTop: `1px solid ${T.bdr}`,
                   }}
                 >
-                  {metrics.map((m) => (
-                    <div
-                      key={m.label}
-                      style={{
-                        ...card,
-                        margin: 0,
-                        padding: "14px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: m.accent, flexShrink: 0 }} />
-                        <div style={{ fontSize: 10, color: T.sub, textTransform: "uppercase", letterSpacing: "0.7px", fontWeight: 700 }}>{m.label}</div>
-                      </div>
-                      <div className="stat-display" style={{ fontSize: 20, fontWeight: 800, color: T.txt, lineHeight: 1 }}>{m.val}</div>
-                      <div style={{ fontSize: 11, color: T.sub, marginTop: 3 }}>{m.sub}</div>
+                  <div className="track-stat-strip__item">
+                    <div className="track-stat-strip__label" style={{ color: T.sub }}>{monthKeyLabel(homeRecentMonthKey)}</div>
+                    <div className="track-stat-strip__value" style={{ color: T.txt }}>{formatMoney(homeRecentTotal)}</div>
+                    <div className="track-stat-strip__sub" style={{ color: T.sub }}>
+                      {homeRecentTxs.length === 1 ? "1 transaction" : `${homeRecentTxs.length} transactions`}
                     </div>
-                  ))}
+                  </div>
+                  <div className="track-stat-strip__item">
+                    <div className="track-stat-strip__label" style={{ color: T.sub }}>Avg per day</div>
+                    <div className="track-stat-strip__value" style={{ color: T.txt }}>{formatMoney(avgDay)}</div>
+                    <div className="track-stat-strip__sub" style={{ color: T.sub }}>{daysIn} days in month</div>
+                  </div>
                 </div>
               );
             })()}
@@ -3807,73 +3766,55 @@ export default function App({ onReady }) {
                 );
               })}
 
-            <div style={{ padding: `0 ${px}px` }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 12,
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 700, color: T.sub, textTransform: "uppercase", letterSpacing: "0.8px" }}>Recent</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
-                  <label htmlFor="home-month-filter" style={{ fontSize: 12, color: T.sub, fontWeight: 600 }}>
-                    Month
-                  </label>
-                  <select
-                    id="home-month-filter"
-                    value={homeRecentMonthKey ?? ""}
-                    onChange={(e) => setHomeRecentMonthKey(e.target.value ? e.target.value : null)}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: T.txt,
-                      background: T.card2,
-                      border: `1px solid ${T.bdr}`,
-                      borderRadius: 10,
-                      padding: "8px 10px",
-                      maxWidth: "min(220px, 100%)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <option value="">{cycleRange ? "This billing period" : "This month"}</option>
-                    {homeMonthPickerOptions.map((mk) => (
-                      <option key={mk} value={mk}>
-                        {monthKeyLabel(mk)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setTab("analytics")}
-                    style={{ background: "none", border: "none", color: T.acc, fontSize: 12, cursor: "pointer", fontWeight: 700, letterSpacing: "0.2px" }}
-                  >
-                    See all →
-                  </button>
+            <div style={{ padding: `0 ${px}px`, marginTop: 4 }}>
+              <div className="track-list-panel">
+                <div className="track-list-panel__head">
+                  <h2 className="track-section-title" style={{ color: T.txt }}>Transactions</h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <select
+                      id="home-month-filter"
+                      className="track-month-select"
+                      value={homeRecentMonthKey ?? ""}
+                      onChange={(e) => setHomeRecentMonthKey(e.target.value ? e.target.value : null)}
+                      style={{ color: T.txt, borderColor: T.bdr, backgroundColor: T.card2 }}
+                      aria-label="Filter transactions by month"
+                    >
+                      <option value="">{cycleRange ? "This billing period" : "This month"}</option>
+                      {homeMonthPickerOptions.map((mk) => (
+                        <option key={mk} value={mk}>
+                          {monthKeyLabel(mk)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setTab("analytics")}
+                      style={{ background: "none", border: "none", color: T.acc, fontSize: 12, cursor: "pointer", fontWeight: 600, padding: "6px 0" }}
+                    >
+                      Open stats
+                    </button>
+                  </div>
                 </div>
+                {homeRecentTxs.length === 0 ? (
+                  <div style={{ fontSize: 13, color: T.sub, textAlign: "center", padding: "32px 16px", lineHeight: 1.5 }}>
+                    No expenses in {homeRecentMonthKey ? monthKeyLabel(homeRecentMonthKey) : cycleRange ? "this billing period" : "this calendar month"}.
+                  </div>
+                ) : (
+                  homeRecentTxs.slice(0, 100).map((tx) => (
+                    <TxRow
+                      key={tx.id}
+                      tx={tx}
+                      onDelete={delTx}
+                      onSelect={setSelectedTx}
+                      categories={categories}
+                      formatMoney={formatMoney}
+                      dateLocale={dateLocale || locale}
+                      selfProfileUuid={profileTagUuid || ""}
+                      selfFbUid={selfFbUid}
+                    />
+                  ))
+                )}
               </div>
-              {homeRecentTxs.length === 0 ? (
-                <div style={{ fontSize: 13, color: T.sub, textAlign: "center", padding: "28px 12px", lineHeight: 1.5 }}>
-                  No expenses in {homeRecentMonthKey ? monthKeyLabel(homeRecentMonthKey) : cycleRange ? "this billing period" : "this calendar month"}.
-                </div>
-              ) : (
-                homeRecentTxs.slice(0, 100).map((tx) => (
-                  <TxRow
-                    key={tx.id}
-                    tx={tx}
-                    onDelete={delTx}
-                    onSelect={setSelectedTx}
-                    categories={categories}
-                    formatMoney={formatMoney}
-                    dateLocale={dateLocale || locale}
-                    selfProfileUuid={profileTagUuid || ""}
-                    selfFbUid={selfFbUid}
-                  />
-                ))
-              )}
             </div>
           </div>
         )}
@@ -4193,19 +4134,18 @@ export default function App({ onReady }) {
                   >
                     <div
                       style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 12,
-                        background: `linear-gradient(135deg, ${opt.col}3d, ${opt.col}12)`,
-                        border: `1px solid ${opt.col}33`,
-                        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${opt.col}1f`,
+                        width: 40,
+                        height: 40,
+                        borderRadius: 10,
+                        background: `${opt.col}14`,
+                        border: `1px solid ${opt.col}28`,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         flexShrink: 0,
                       }}
                     >
-                      <opt.Icon size={22} color={opt.col} strokeWidth={2} />
+                      <opt.Icon size={20} color={opt.col} strokeWidth={2} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -4282,19 +4222,18 @@ export default function App({ onReady }) {
                 >
                   <div
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      background: `linear-gradient(135deg, ${T.blue}3d, ${T.blue}12)`,
-                      border: `1px solid ${T.blue}33`,
-                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${T.blue}1f`,
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: `${T.blue}14`,
+                      border: `1px solid ${T.blue}28`,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       flexShrink: 0,
                     }}
                   >
-                    <Camera size={22} color={T.blue} strokeWidth={2} />
+                    <Camera size={20} color={T.blue} strokeWidth={2} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Take photo</div>
@@ -4320,19 +4259,18 @@ export default function App({ onReady }) {
                 >
                   <div
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 12,
-                      background: `linear-gradient(135deg, ${T.acc}3d, ${T.acc}12)`,
-                      border: `1px solid ${T.acc}33`,
-                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 2px 8px ${T.acc}1f`,
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: `${T.acc}14`,
+                      border: `1px solid ${T.acc}28`,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       flexShrink: 0,
                     }}
                   >
-                    <ImageIcon size={22} color={T.acc} strokeWidth={2} />
+                    <ImageIcon size={20} color={T.acc} strokeWidth={2} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>Choose one photo</div>
@@ -7310,17 +7248,16 @@ export default function App({ onReady }) {
       ) : null}
     </div>
 
-    {/* ── Floating Liquid Glass Tab Bar ── */}
-      <div
-        className="glass-tab-bar"
+    {/* ── Main navigation ── */}
+      <nav
+        className="track-tab-bar glass-tab-bar"
+        aria-label="Main"
         style={{
           position: "fixed",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-around",
           boxSizing: "border-box",
-          zIndex: 99,
-          overflow: "visible",
         }}
       >
         {[
@@ -7335,25 +7272,15 @@ export default function App({ onReady }) {
               <button
                 type="button"
                 key="add"
+                className="track-tab-fab ios-fab"
+                aria-label="Add expense"
                 onClick={() => { setTab("add"); setStep("mode"); }}
                 style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: "50%",
                   background: T.acc,
-                  border: "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  transform: "translateY(-20px)",
-                  flexShrink: 0,
-                  position: "relative",
-                  zIndex: 1,
-                  boxShadow: `0 4px 20px ${T.acc}90, 0 0 0 4px ${T.acc}25`,
+                  boxShadow: `0 2px 12px ${T.acc}55`,
                 }}
               >
-                <Plus size={24} color={T.btnTxt} strokeWidth={2.6} />
+                <Plus size={22} color={T.btnTxt} strokeWidth={2.4} />
               </button>
             );
           const active = tab === item.id;
@@ -7361,36 +7288,20 @@ export default function App({ onReady }) {
             <button
               type="button"
               key={item.id}
+              className={`track-tab-item${active ? " is-active" : ""}`}
+              aria-current={active ? "page" : undefined}
               onClick={() => setTab(item.id)}
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 3,
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "6px 4px",
-                minWidth: 0,
-              }}
             >
-              <item.Icon size={22} color={active ? T.acc : T.sub} strokeWidth={active ? 2.2 : 1.7} />
-              <span style={{
-                fontSize: 10,
-                fontWeight: active ? 700 : 500,
-                color: active ? T.acc : T.sub,
-                lineHeight: 1,
-                textAlign: "center",
-                width: "100%",
-              }}>
+              <span className="track-tab-item__icon">
+                <item.Icon size={21} color={active ? T.acc : T.sub} strokeWidth={active ? 2.1 : 1.75} />
+              </span>
+              <span className="track-tab-item__label" style={{ color: active ? T.acc : T.sub }}>
                 {item.label}
               </span>
             </button>
           );
         })}
-      </div>
+      </nav>
 
     {/* Transaction detail overlay */}
     {selectedTx && (

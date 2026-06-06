@@ -15,7 +15,7 @@ const THEMES = {
     blue: "#7DA3FF", bdim: "rgba(125,163,255,0.13)",
     purp: "#B69CFF", pdim: "rgba(182,156,255,0.13)",
     grn: "#22C55E",
-    txt: "#F1F1F8", sub: "#7878A0", mut: "#2E2E55",
+    txt: "#F1F1F8", sub: "#9494B0", mut: "#3A3A58",
     btnTxt: "#000000",
     heroGrad: "#12122A",
     r: 10, rLg: 14,
